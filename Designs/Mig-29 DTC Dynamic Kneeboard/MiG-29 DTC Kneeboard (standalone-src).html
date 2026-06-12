@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MiG-29 DTC Kneeboard</title>
+<template id="__bundler_thumbnail" data-bg-color="#1f2024">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#1f2024"/>
+    <g transform="translate(360 160)">
+      <rect x="0" y="0" width="480" height="640" fill="#ffffff"/>
+      <rect x="0" y="0" width="200" height="80" fill="#15171a"/>
+      <text x="100" y="56" text-anchor="middle" font-family="Barlow Condensed, Arial, sans-serif" font-weight="800" font-size="44" fill="#ffffff" letter-spacing="2">MiG-29A</text>
+      <text x="220" y="56" font-family="Barlow Condensed, Arial, sans-serif" font-weight="800" font-size="40" fill="#15171a">DTC</text>
+      <line x1="0" y1="100" x2="480" y2="100" stroke="#15171a" stroke-width="3"/>
+      <g fill="#ECEEF1">
+        <rect x="20" y="120" width="135" height="36"/>
+        <rect x="172" y="120" width="135" height="36"/>
+        <rect x="324" y="120" width="135" height="36"/>
+      </g>
+      <g fill="#15171a" opacity="0.85">
+        <rect x="20" y="170" width="290" height="14"/>
+        <rect x="20" y="190" width="240" height="14"/>
+        <rect x="20" y="210" width="200" height="14"/>
+        <rect x="20" y="240" width="180" height="14"/>
+        <rect x="20" y="260" width="220" height="14"/>
+        <rect x="20" y="280" width="160" height="14"/>
+        <rect x="324" y="170" width="135" height="14"/>
+        <rect x="324" y="190" width="135" height="14"/>
+        <rect x="324" y="210" width="135" height="14"/>
+      </g>
+      <rect x="324" y="320" width="135" height="280" fill="#15171a" opacity="0.06"/>
+      <g fill="#15171a" opacity="0.7">
+        <rect x="334" y="332" width="115" height="10"/>
+        <rect x="334" y="352" width="100" height="10"/>
+        <rect x="334" y="372" width="115" height="10"/>
+        <rect x="334" y="392" width="95" height="10"/>
+        <rect x="334" y="412" width="115" height="10"/>
+        <rect x="334" y="432" width="105" height="10"/>
+        <rect x="334" y="452" width="115" height="10"/>
+        <rect x="334" y="472" width="90" height="10"/>
+      </g>
+      <g>
+        <rect x="20" y="540" width="290" height="36" fill="none" stroke="#C1273B" stroke-width="3"/>
+        <text x="165" y="566" text-anchor="middle" font-family="Barlow Condensed, Arial, sans-serif" font-weight="800" font-size="22" fill="#C1273B" letter-spacing="3">LOCK</text>
+      </g>
+    </g>
+  </svg>
+</template>
+<link rel="stylesheet" href="ds/colors_and_type.css" />
+<link rel="stylesheet" href="ds/kneeboard.css" />
+<style>
+  /* ───────── Viewer chrome (NOT part of the kneeboard) ───────── */
+  html, body { margin: 0; background: #1f2024; color: #ddd; font-family: var(--font-body); min-height: 100%; }
+  .toc { padding: 22px 36px 18px; border-bottom: 1px solid #383a40; }
+  .toc h1 { font-family: var(--font-display); font-weight: 800; font-size: 26px; margin: 0; color: #f7d046; text-transform: uppercase; letter-spacing: -0.005em; }
+  .toc .lede { font-size: 13px; color: #b3b6bd; margin: 6px 0 0; max-width: 920px; line-height: 1.5; }
+  .toc nav { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .toc a { color: #ddd; text-decoration: none; padding: 6px 12px; border: 1px solid #4a4d54; border-radius: 2px; font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.02em; }
+  .toc a:hover { background: #f7d046; color: #15171a; border-color: #f7d046; }
+  .toc .crumb { font-family: var(--font-mono); font-size: 11px; color: #8e9099; margin-top: 8px; display: block; }
+
+  .stage-label { color: #8e9099; font-family: var(--font-mono); font-size: 12px; padding: 36px 36px 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .stage-label b { color: #f1f2f5; font-weight: 700; font-family: var(--font-display); font-size: 18px; letter-spacing: 0.02em; margin-right: 10px; }
+  .stage-sub { color: #8e9099; font-size: 12px; padding: 0 36px 16px; max-width: 880px; line-height: 1.5; }
+  .stage { padding: 6px 36px 36px; }
+
+  /* Each kneeboard renders at exact 1536x2048 (output spec) but is scaled to fit on screen. */
+  .frame-row { display: flex; gap: 36px; flex-wrap: wrap; align-items: flex-start; }
+  .frame-wrap { width: 614.4px; /* 1536 * 0.4 */ }
+  .frame-wrap .meta { display: flex; gap: 12px; align-items: baseline; margin-bottom: 8px; color: #b3b6bd; font-family: var(--font-mono); font-size: 11px; }
+  .frame-wrap .meta .name { color: #f7d046; font-family: var(--font-display); font-size: 16px; letter-spacing: 0.02em; text-transform: uppercase; }
+  .frame { width: 614.4px; height: 819.2px; background: #fff; box-shadow: 0 12px 36px rgba(0,0,0,0.5); position: relative; overflow: hidden; }
+  .frame .kb-mig { transform: scale(0.4); transform-origin: top left; }
+
+  /* ────────────────────────────────────────────────────────────────────
+   *  KNEEBOARD PAGE — exactly 1536 × 2048 px (DCS portrait kneeboard)
+   * ──────────────────────────────────────────────────────────────────── */
+  .kb-mig {
+    width: 1536px; height: 2048px;
+    background: #ffffff;
+    color: var(--ink);
+    font-family: var(--font-body);
+    position: relative; overflow: hidden;
+    box-sizing: border-box;
+    padding: 48px;
+    display: flex; flex-direction: column;
+    --gap: 24px;
+    --rule-w: 2px;
+    --rule-w-thin: 1.5px;
+    --row-h: 64px;
+    --row-h-tight: 44px;
+    --head-h: 70px;
+  }
+
+  /* HEADER */
+  .kb-mig__hdr {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: stretch;
+    border: var(--rule-w) solid var(--ink);
+    background: #fff;
+    margin-bottom: var(--gap);
+  }
+  .kb-mig__hdr .pn {
+    background: var(--ink); color: #fff;
+    padding: 18px 44px 18px 28px;
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 56px; letter-spacing: 0.02em; line-height: 1;
+    display: flex; align-items: center; gap: 14px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 24px) 100%, 0 100%);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .kb-mig__hdr .pn small { font-family: var(--font-mono); font-weight: 500; font-size: 22px; letter-spacing: 0.08em; opacity: 0.7; }
+  .kb-mig__hdr .ttl {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 10px 24px;
+    border-left: 0;
+  }
+  .kb-mig__hdr .ttl h1 {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 70px; line-height: 1; margin: 0;
+    text-transform: uppercase; letter-spacing: -0.005em;
+    color: var(--ink);
+  }
+  .kb-mig__hdr .ttl .sub {
+    margin-top: 8px;
+    font-family: var(--font-body); font-weight: 600;
+    font-size: 24px; color: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
+  .kb-mig__hdr .meta {
+    display: grid; grid-template-columns: auto auto;
+    border-left: var(--rule-w) solid var(--ink);
+    align-items: stretch;
+    font-family: var(--font-mono);
+  }
+  .kb-mig__hdr .meta { grid-template-columns: 1fr; }
+  .kb-mig__hdr .meta .cell {
+    padding: 14px 26px;
+    display: flex; flex-direction: column; justify-content: center;
+    border-bottom: var(--rule-w-thin) solid var(--ink);
+    min-width: 280px;
+  }
+  .kb-mig__hdr .meta .cell:last-child { border-bottom: none; }
+  .kb-mig__hdr .meta .lbl {
+    font-family: var(--font-body); font-weight: 700;
+    font-size: 14px; color: var(--ink-2);
+    letter-spacing: 0.18em; text-transform: uppercase;
+    line-height: 1; margin-bottom: 8px;
+  }
+  .kb-mig__hdr .meta .v { font-family: var(--font-mono); font-weight: 500; font-size: 28px; color: var(--ink); line-height: 1; }
+
+  /* (yellow corner pennant removed — was redundant with header data) */
+
+  /* SECTION CARDS */
+  .sec {
+    border: var(--rule-w) solid var(--ink);
+    background: #fff;
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .sec__head {
+    background: var(--ink); color: #fff;
+    height: var(--head-h);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 34px; letter-spacing: 0.04em;
+    text-transform: uppercase; line-height: 1;
+    flex-shrink: 0;
+  }
+  .sec__head .ttl { display: flex; align-items: baseline; gap: 16px; white-space: nowrap; }
+  .sec__head .ttl span { white-space: nowrap; }
+  .sec__head .sub {
+    font-family: var(--font-body); font-weight: 500;
+    font-size: 16px; letter-spacing: 0.18em; opacity: 0.7;
+    text-transform: uppercase;
+  }
+  .sec__head .count {
+    font-family: var(--font-mono); font-weight: 600;
+    font-size: 22px; opacity: 0.78;
+    letter-spacing: 0.04em;
+  }
+  /* "Band" treatment — a thicker labelled strip used to group sections */
+  .band__head {
+    background: var(--ink); color: #fff;
+    height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 26px;
+    font-family: var(--font-display); font-weight: 700;
+    font-size: 28px; letter-spacing: 0.18em;
+    text-transform: uppercase; line-height: 1;
+    margin-bottom: 12px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
+    flex-shrink: 0;
+  }
+  .band__head .right { font-family: var(--font-mono); font-weight: 500; font-size: 18px; letter-spacing: 0.06em; opacity: 0.7; }
+
+  /* COLUMN HEADER STRIP inside a section */
+  .ch {
+    display: grid; align-items: center;
+    background: #ECEEF1;
+    border-bottom: var(--rule-w-thin) solid var(--ink);
+    padding: 8px 0;
+  }
+  .ch > div {
+    padding: 0 22px;
+    font-family: var(--font-body); font-weight: 700;
+    font-size: 16px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--ink-2);
+    line-height: 1;
+  }
+  .ch > div + div { border-left: 1px dotted var(--rule); }
+
+  /* DATA ROW */
+  .row {
+    display: grid; align-items: center;
+    min-height: var(--row-h);
+    padding: 8px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .row:last-child { border-bottom: none; }
+  .row > div { padding: 0 22px; line-height: 1.1; }
+  .row > div + div { border-left: 1px dotted var(--rule); }
+
+  .row.tight { min-height: var(--row-h-tight); padding: 4px 0; }
+
+  /* CELL TYPOGRAPHY */
+  .slot { font-family: var(--font-mono); font-weight: 500; font-size: 30px; color: var(--ink); letter-spacing: 0.02em; white-space: nowrap; }
+  .name { font-family: var(--font-body); font-weight: 600; font-size: 32px; color: var(--ink); }
+  .name.sm { font-size: 26px; }
+  .val { font-family: var(--font-mono); font-weight: 500; font-size: 28px; color: var(--ink); }
+  .val.muted { color: var(--ink-3); }
+  .ch-tag { font-family: var(--font-mono); font-weight: 700; font-size: 26px; color: var(--ink-2); }
+  .freq { font-family: var(--font-mono); font-weight: 500; font-size: 30px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .mod { font-family: var(--font-mono); font-weight: 500; font-size: 22px; color: var(--ink-2); }
+
+  /* STATUS chips for SPO-15 */
+  .st {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 110px;
+    height: 44px;
+    padding: 0 18px;
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 24px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border: 2px solid currentColor;
+    line-height: 1;
+  }
+  .st--lock { background: #fff; color: var(--data-red); border-color: var(--data-red); font-weight: 800; }
+  .st--on   { background: #fff; color: var(--data-green); border-color: var(--data-green); font-weight: 800; }
+  .st--off  { background: #fff; color: var(--ink-3); border-color: var(--ink-3); }
+  .cyr { font-family: var(--font-display); font-weight: 800; font-size: 48px; line-height: 1; color: var(--ink); }
+  .cyr-lat { font-family: var(--font-mono); font-weight: 400; font-size: 36px; color: var(--ink-3); margin-left: 8px; }
+
+  /* EMPTY STATE */
+  .empty {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--ink-3);
+    padding: 36px 18px;
+    gap: 8px;
+  }
+  .empty .lbl {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 42px; letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .empty .hint {
+    font-family: var(--font-body); font-weight: 500; font-size: 18px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .empty .hatch {
+    width: 80%; height: 1px; background-image: repeating-linear-gradient(90deg, var(--rule) 0 6px, transparent 6px 12px);
+    margin: 4px 0 6px;
+  }
+
+  /* GRID HELPERS */
+  .grid { display: grid; gap: var(--gap); flex: 1; min-height: 0; }
+  .gap-sm { gap: 16px; }
+
+  /* ──── Layout-specific grid templates ──── */
+  /* Layout 1 — Omar's Grid (3×3 with ADF spanning 2 cols and Radio spanning 2 rows) */
+  .L1 .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 420px 1fr 1fr;
+    gap: var(--gap);
+    flex: 1; min-height: 0;
+  }
+  .L1 .g-wpt   { grid-column: 1; grid-row: 1; }
+  .L1 .g-ard   { grid-column: 2; grid-row: 1; }
+  .L1 .g-rsbn  { grid-column: 3; grid-row: 1; }
+  .L1 .g-adf   { grid-column: 1 / span 2; grid-row: 2; }
+  .L1 .g-radio { grid-column: 3; grid-row: 2 / span 2; }
+  .L1 .g-spo   { grid-column: 1; grid-row: 3; }
+  .L1 .g-cmds  { grid-column: 2; grid-row: 3; }
+  .L1 .grid > div { display: flex; min-height: 0; }
+  .L1 .grid > div > section { flex: 1; min-height: 0; overflow: hidden; }
+
+  /* Radio dual-column body */
+  .radio-2col {
+    display: grid; grid-template-columns: 1fr 1fr;
+    flex: 1; min-height: 0;
+  }
+  .radio-2col > .col + .col { border-left: var(--rule-w-thin) solid var(--ink); }
+  .radio-2col .col { display: flex; flex-direction: column; min-height: 0; }
+  .radio-1col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+  /* ────────────────────────────────────────────────────────────────────
+   *  SPEC SHEET (designer-facing reference)
+   * ──────────────────────────────────────────────────────────────────── */
+  .spec {
+    background: #f3f1ec;
+    color: #15171a;
+    margin: 36px;
+    padding: 36px 44px;
+    border: 1px solid #c8c2b6;
+  }
+  .spec h2 { font-family: var(--font-display); font-weight: 800; font-size: 32px; margin: 0 0 8px; letter-spacing: -0.005em; text-transform: uppercase; color: var(--ink); }
+  .spec h3 { font-family: var(--font-display); font-weight: 700; font-size: 20px; margin: 24px 0 8px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); border-bottom: 1px solid var(--ink); padding-bottom: 4px; }
+  .spec p { font-size: 13px; line-height: 1.55; margin: 0 0 8px; max-width: 920px; }
+  .spec table { border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; width: 100%; max-width: 980px; }
+  .spec table th, .spec table td { padding: 6px 12px; text-align: left; border-bottom: 1px dotted #c8c2b6; vertical-align: top; }
+  .spec table th { font-family: var(--font-body); font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); border-bottom: 1.5px solid var(--ink); }
+  .spec .swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .spec .swatch i { width: 14px; height: 14px; display: inline-block; border: 1px solid rgba(0,0,0,0.15); }
+  .spec code { background: #e8e4dc; padding: 1px 6px; border-radius: 2px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="toc">
+  <h1>MiG-29 DTC Kneeboard</h1>
+  <p class="lede">DCS MiG-29A DTC summary kneeboard, rendered at exact 1536×2048 px portrait. Followed by a Pillow-ready spec sheet and an empty-state RSBN reference.</p>
+  <nav>
+    <a href="#L1">Kneeboard</a>
+    <a href="#empty">Empty state</a>
+    <a href="#spec">Spec sheet</a>
+  </nav>
+  <span class="crumb">on-screen: scaled 0.40× · output: 1536 × 2048 JPG · white background</span>
+</div>
+
+<div class="stage-label" id="L1"><b>Kneeboard</b> WPT · ARD · RSBN across the top, ADF in the middle, SPO-15 / CMDS / Radio along the bottom</div>
+<div class="stage-sub">Three-column grid. Top row holds the navigation triplet (each box sized to take 3 entries). ADF spans columns 1–2. Radio occupies column 3 across the bottom two rows; SPO-15 and CMDS fill the bottom-left.</div>
+<div class="stage"><div class="frame-row"><div class="frame-wrap">
+  <div class="meta"><span class="name">Kneeboard</span><span>1536 × 2048 px · white bg · scale 0.40×</span></div>
+  <div class="frame"><div id="m-L1"></div></div>
+</div></div></div>
+
+<div class="stage-label" id="empty"><b>Empty state</b> RSBN with no configured stations</div>
+<div class="stage-sub">When a section has no data, the row area is replaced with a centered &ldquo;NO CONFIG&rdquo; label in muted ink, flanked by hatched rules. Section header band remains identical so the grid stays stable across mission cards.</div>
+<div class="stage"><div class="frame-row"><div class="frame-wrap">
+  <div class="meta"><span class="name">L1 · empty RSBN</span><span>1536 × 2048 px · white bg · scale 0.40×</span></div>
+  <div class="frame"><div id="m-LE"></div></div>
+</div></div></div>
+
+<!-- SPEC SHEET (rendered as part of the same document for designer reference) -->
+<div class="spec" id="spec">
+  <h2>Pillow Replication Spec</h2>
+  <p><strong>Canvas.</strong> 1536 × 2048 px (portrait), background <code>#FFFFFF</code> (true white for cockpit-display contrast — kneeboard paper cream is too low-contrast at small scale). All measurements below are in pixels at this resolution.</p>
+
+  <h3>Page frame</h3>
+  <table>
+    <tr><th>Element</th><th>Value</th></tr>
+    <tr><td>Outer margin (all sides)</td><td>48</td></tr>
+    <tr><td>Section gap (between sibling sections)</td><td>24</td></tr>
+    <tr><td>Outer / structural border weight</td><td>2.0 px solid <code>#15171A</code></td></tr>
+    <tr><td>Inner / divider border weight</td><td>1.5 px solid <code>#15171A</code></td></tr>
+    <tr><td>Row separator</td><td>1 px dotted <code>#C8C2B6</code> (6px on / 6px off)</td></tr>
+    <tr><td>Col separator</td><td>1 px dotted <code>#C8C2B6</code></td></tr>
+  </table>
+
+  <h3>Header (top of page, full width)</h3>
+  <table>
+    <tr><th>Sub-element</th><th>Spec</th></tr>
+    <tr><td>Strip total height</td><td>~150 px (auto-fits content + padding)</td></tr>
+    <tr><td>Page-tag (left, ink fill, 22px notch on bottom-right)</td><td>Background <code>#15171A</code>, height = strip; padding 14 / 22 / 14 / 36; text Barlow Condensed 800 36 px white, all-caps</td></tr>
+    <tr><td>Title</td><td>Barlow Condensed 800, 56 px, <code>#15171A</code>, all-caps, line-height 1, tracking −0.005em</td></tr>
+    <tr><td>Subtitle line</td><td>Barlow 500, 18 px, <code>#2C2F35</code></td></tr>
+    <tr><td>Meta cells (Active Program, Map, Generated)</td><td>Each cell: padding 10×22, label Barlow 700 12 px tracked 0.18em UPPER <code>#2C2F35</code>; value JetBrains Mono 500 22 px <code>#15171A</code>; &ldquo;Program 1&rdquo; uses Barlow Condensed 800 30 px instead.</td></tr>
+    <tr><td>DimOn-style yellow pennant (top-right corner)</td><td>Background <code>#F7D046</code>, 18 px diagonal cut on bottom-left, optional — purely brand chrome</td></tr>
+  </table>
+
+  <h3>Section card</h3>
+  <table>
+    <tr><th>Sub-element</th><th>Spec</th></tr>
+    <tr><td>Border</td><td>2 px solid <code>#15171A</code></td></tr>
+    <tr><td>Header band height</td><td>64 px, fill <code>#15171A</code></td></tr>
+    <tr><td>Header title</td><td>Barlow Condensed 800, 28 px white, tracked 0.04em, all-caps, padded 22 px L/R</td></tr>
+    <tr><td>Header subtitle (optional, e.g. &ldquo;NAV&rdquo; or count)</td><td>Barlow 500 14 px white, tracked 0.18em, opacity 0.70</td></tr>
+    <tr><td>Header right-side count (e.g. &ldquo;3 / 3&rdquo;)</td><td>JetBrains Mono 500 18 px white, opacity 0.75</td></tr>
+    <tr><td>Column-header strip (inside body, when used)</td><td>Fill <code>#ECEEF1</code> (cool light gray), height 40 px, text Barlow 700 13 px <code>#2C2F35</code> tracked 0.18em UPPER</td></tr>
+    <tr><td>Default row min-height</td><td>56 px</td></tr>
+    <tr><td>Compact row (Radio 20-channel)</td><td>40 px min-height</td></tr>
+    <tr><td>Row inner padding</td><td>8 px top/bottom, 18 px left/right</td></tr>
+  </table>
+
+  <h3>Cell typography</h3>
+  <table>
+    <tr><th>Style</th><th>Family</th><th>Weight</th><th>Size</th><th>Color</th></tr>
+    <tr><td>Slot tag (WPT1, ARD1, RSBN1, ADF 1, CH 00)</td><td>JetBrains Mono</td><td>500</td><td>24 px</td><td><code>#15171A</code></td></tr>
+    <tr><td>Resolved name</td><td>Barlow</td><td>600</td><td>26 px</td><td><code>#15171A</code></td></tr>
+    <tr><td>Secondary value (runway, ch number, freq)</td><td>JetBrains Mono</td><td>500</td><td>22–24 px (tabular nums)</td><td><code>#15171A</code></td></tr>
+    <tr><td>Modulation tag (AM/FM)</td><td>JetBrains Mono</td><td>500</td><td>18 px</td><td><code>#2C2F35</code></td></tr>
+    <tr><td>SPO-15 Cyrillic glyph</td><td>Barlow Condensed</td><td>800</td><td>36 px</td><td><code>#15171A</code></td></tr>
+    <tr><td>SPO-15 Latin equivalent (parens)</td><td>JetBrains Mono</td><td>500</td><td>16 px</td><td><code>#2C2F35</code></td></tr>
+  </table>
+
+  <h3>SPO-15 status chips</h3>
+  <p>Pill-style fixed-width chip (min-width 90 px, height 36 px, no radius). Centered text is Barlow Condensed 800 18 px tracked 0.12em UPPER. Three states:</p>
+  <table>
+    <tr><th>State</th><th>Fill</th><th>Text</th><th>Border</th><th>Notes</th></tr>
+    <tr><td>Lock</td><td><code>#FFFFFF</code></td><td><span class="swatch"><i style="background:#C1273B"></i><code>#C1273B</code></span></td><td>1.5 px <code>#C1273B</code></td><td>Outlined red, bold weight. Highest-priority threat — reads at glance without dominating.</td></tr>
+    <tr><td>On</td><td><code>#FFFFFF</code></td><td><span class="swatch"><i style="background:#1F8A3F"></i><code>#1F8A3F</code></span></td><td>1.5 px <code>#1F8A3F</code></td><td>Outlined green. Active but not critical.</td></tr>
+    <tr><td>Off</td><td><code>#FFFFFF</code></td><td><span class="swatch"><i style="background:#8A8E95"></i><code>#8A8E95</code></span></td><td>1.5 px <code>#8A8E95</code></td><td>Muted gray, no fill.</td></tr>
+  </table>
+
+  <h3>Empty-state pattern</h3>
+  <p>When a section has no entries the body area shows: a top hatched rule (6px-on/6px-off, 1 px, color <code>#C8C2B6</code>), then centered text <strong>NO CONFIG</strong> in Barlow Condensed 800 32 px <code>#8A8E95</code> tracked 0.16em UPPER, optional hint &ldquo;NOT PROGRAMMED&rdquo; in Barlow 500 14 px tracked 0.12em <code>#8A8E95</code>, then a bottom hatched rule. The header band is unchanged so muscle memory holds.</p>
+
+  <h3>Color palette</h3>
+  <table>
+    <tr><th>Token</th><th>Hex</th><th>Used for</th></tr>
+    <tr><td>ink</td><td><span class="swatch"><i style="background:#15171A"></i>#15171A</span></td><td>All primary text, section header fills, structural rules</td></tr>
+    <tr><td>ink-2</td><td><span class="swatch"><i style="background:#2C2F35"></i>#2C2F35</span></td><td>Secondary text, eyebrows</td></tr>
+    <tr><td>ink-3</td><td><span class="swatch"><i style="background:#8A8E95"></i>#8A8E95</span></td><td>&ldquo;Off&rdquo; status, NO CONFIG label</td></tr>
+    <tr><td>col-header</td><td><span class="swatch"><i style="background:#ECEEF1"></i>#ECEEF1</span></td><td>Column-header strip fill (cool light gray)</td></tr>
+    <tr><td>paper-2</td><td><span class="swatch"><i style="background:#E8E4DC"></i>#E8E4DC</span></td><td>(reference only) warm cream from base palette</td></tr>
+    <tr><td>rule</td><td><span class="swatch"><i style="background:#C8C2B6"></i>#C8C2B6</span></td><td>Dotted dividers</td></tr>
+    <tr><td>brand-yellow</td><td><span class="swatch"><i style="background:#F7D046"></i>#F7D046</span></td><td>Optional DimOn-style corner pennant</td></tr>
+    <tr><td>data-red</td><td><span class="swatch"><i style="background:#C1273B"></i>#C1273B</span></td><td>SPO-15 Lock state, critical flags</td></tr>
+    <tr><td>data-green</td><td><span class="swatch"><i style="background:#1F8A3F"></i>#1F8A3F</span></td><td>SPO-15 On state</td></tr>
+  </table>
+
+  <h3>Fonts</h3>
+  <p>Barlow Condensed (display, 700/800), Barlow (body, 500/600/700), JetBrains Mono (data, 500/700) — all available on Google Fonts. Substitute with Oswald / Open Sans / Roboto Mono if exact families aren&#39;t bundled with the Pillow generator. All numeric data uses <code>font-variant-numeric: tabular-nums</code> to keep frequency columns aligned.</p>
+
+  <h3>Layout-specific column splits</h3>
+  <table>
+    <tr><th>Layout</th><th>Body grid (rows × cols)</th><th>Notable proportions</th></tr>
+    <tr><td>Kneeboard</td><td>3 rows · top 420 px (3-entry nav triplet), mid + bottom 1fr each</td><td>ADF spans cols 1–2 of row 2. Radio occupies col 3 of rows 2–3 (carries the full 20-row preset list). SPO-15 + CMDS fill cols 1 and 2 of row 3.</td></tr>
+  </table>
+</div>
+
+<script>
+/* Sample data — identical across all 4 layouts. */
+const D = {
+  hdr: { title: "MiG-29 DTC Configuration", program: "Program 1", map: "Syria", generated: "08 May 2026 14:32 UTC" },
+  wpt: [{ slot:"WPT1", name:"Abu al-Duhur" }],
+  wptCap: 3,
+  ard: [
+    { slot:"ARD1", name:"Abu al-Duhur",   rwy:"—" },
+    { slot:"ARD2", name:"Wujah Al Hajar", rwy:"02" },
+    { slot:"ARD3", name:"Shayrat",        rwy:"—" },
+  ],
+  ardCap: 3,
+  rsbn: [{ slot:"RSBN1", name:"Krasnodar-Center", ch:"Ch 40" }],
+  rsbnCap: 3,
+  adf: [
+    { ch:"ADF 1", inner:"Rayak",   outer:"Bassel"   },
+    { ch:"ADF 2", inner:"Tiyas",   outer:"Damascus" },
+    { ch:"ADF 3", inner:"Hama",    outer:"Aleppo"   },
+    { ch:"ADF 4", inner:"Palmyra", outer:"Beirut"   },
+  ],
+  radio: [
+    [0,124],[1,264],[2,265],[3,256],[4,254],[5,250],[6,270],[7,257],[8,255],[9,262],
+    [10,259],[11,268],[12,269],[13,260],[14,263],[15,261],[16,267],[17,258],[18,253],[19,251],
+  ],
+  cmds: [
+    ["Burst Count I","1"],
+    ["Burst Count II","1"],
+    ["Burst Interval","0.5s"],
+    ["Salvo Count (Air)","1"],
+    ["Salvo Count (SAM)","6"],
+    ["Salvo Interval","5s"],
+  ],
+  spo: [
+    { cyr:"П", lat:"P", st:"Lock" },
+    { cyr:"З", lat:"3", st:"On"   },
+    { cyr:"Х", lat:"X", st:"Off"  },
+    { cyr:"Н", lat:"H", st:"On"   },
+    { cyr:"Ф", lat:"F", st:"Lock" },
+    { cyr:"С", lat:"C", st:"Off"  },
+  ],
+};
+
+/* ───────── Builders ───────── */
+const fmt = (n) => String(n).padStart(2,"0");
+const pad2 = (n) => String(n).padStart(2,"0");
+
+function header() {
+  return `
+  <div class="kb-mig__hdr">
+    <div class="pn">MiG-29A</div>
+    <div class="ttl">
+      <h1>DTC · ${D.hdr.program}</h1>
+      <div class="sub">Data Transfer Cartridge Configuration Summary</div>
+    </div>
+    <div class="meta">
+      <div class="cell"><div class="lbl">Theatre</div><div class="v">${D.hdr.map}</div></div>
+      <div class="cell"><div class="lbl">Generated</div><div class="v">${D.hdr.generated}</div></div>
+    </div>
+  </div>
+  `;
+}
+
+/* Section card with custom body */
+function sec(opts) {
+  const { title, eyebrow, body } = opts;
+  return `
+  <section class="sec">
+    <div class="sec__head">
+      <div class="ttl"><span>${title}</span>${eyebrow ? `<span class="sub">${eyebrow}</span>` : ""}</div>
+    </div>
+    ${body}
+  </section>`;
+}
+
+function emptyBody(hint = "Not programmed") {
+  return `<div class="empty">
+    <div class="hatch"></div>
+    <div class="lbl">No Config</div>
+    <div class="hint">${hint}</div>
+    <div class="hatch"></div>
+  </div>`;
+}
+
+/* WPT (slot + name) */
+function wptBody(rows = D.wpt, cap = D.wptCap) {
+  const filled = rows.map(r => `
+    <div class="row" style="grid-template-columns: 110px 1fr;">
+      <div><span class="slot">${r.slot}</span></div>
+      <div><span class="name">${r.name}</span></div>
+    </div>`).join("");
+  const empties = Array.from({length: cap - rows.length}, (_, i) => `
+    <div class="row" style="grid-template-columns: 110px 1fr;">
+      <div><span class="slot" style="opacity:.45">WPT${rows.length + i + 1}</span></div>
+      <div><span class="val muted">—</span></div>
+    </div>`).join("");
+  return `<div class="ch" style="grid-template-columns: 110px 1fr;"><div>Slot</div><div>Resolved Name</div></div>${filled}${empties}`;
+}
+
+/* ARD */
+function ardBody(rows = D.ard, cap = D.ardCap) {
+  const cols = "grid-template-columns: 130px 1fr 65px;";
+  const filled = rows.map(r => `
+    <div class="row" style="${cols}">
+      <div><span class="slot">${r.slot}</span></div>
+      <div><span class="name">${r.name}</span></div>
+      <div style="width:65px;"><span class="val ${r.rwy === "—" ? "muted" : ""}">${r.rwy}</span></div>
+    </div>`).join("");
+  const empties = Array.from({length: cap - rows.length}, (_, i) => `
+    <div class="row" style="${cols}"><div><span class="slot" style="opacity:.45">ARD${rows.length + i + 1}</span></div><div><span class="val muted">—</span></div><div style="width:65px;"><span class="val muted">—</span></div></div>`).join("");
+  return `<div class="ch" style="${cols}"><div>Slot</div><div>Resolved Name</div><div>RWY</div></div>${filled}${empties}`;
+}
+
+/* RSBN */
+function rsbnBody(rows = D.rsbn, cap = D.rsbnCap) {
+  if (rows.length === 0) return emptyBody("RSBN not programmed");
+  const cols = "grid-template-columns: 130px 1fr 110px;";
+  const filled = rows.map(r => `
+    <div class="row" style="${cols}">
+      <div><span class="slot">${r.slot}</span></div>
+      <div><span class="name">${r.name}</span></div>
+      <div><span class="val">${r.ch}</span></div>
+    </div>`).join("");
+  const empties = Array.from({length: cap - rows.length}, (_, i) => `
+    <div class="row" style="${cols}"><div><span class="slot" style="opacity:.45">RSBN${rows.length + i + 1}</span></div><div><span class="val muted">—</span></div><div><span class="val muted">—</span></div></div>`).join("");
+  return `<div class="ch" style="${cols}"><div>Slot</div><div>Station</div><div>Channel</div></div>${filled}${empties}`;
+}
+
+/* ADF (channel | inner | outer) */
+function adfBody(rows = D.adf) {
+  const cols = "grid-template-columns: 170px 1fr 1fr;";
+  const filled = rows.map(r => `
+    <div class="row" style="${cols}">
+      <div><span class="slot">${r.ch}</span></div>
+      <div style="font-size:32px;"><span class="name sm" style="font-size:32px;">${r.inner}</span></div>
+      <div style="font-size:32px;"><span class="name sm" style="font-size:32px;">${r.outer}</span></div>
+    </div>`).join("");
+  return `<div class="ch" style="${cols}"><div>Channel</div><div style="font-size:16px;">Inner</div><div style="font-size:16px;">Outer</div></div>${filled}`;
+}
+
+/* Radio — one column */
+function radioBody1col(rows = D.radio) {
+  const cols = "grid-template-columns: 130px 1fr 80px;";
+  const list = rows.map(([n, f]) => `
+    <div class="row tight" style="${cols}">
+      <div><span class="slot">CH ${pad2(n)}</span></div>
+      <div style="padding-left:32px;"><span class="freq">${f.toFixed(3)}</span></div>
+      <div><span class="mod">AM</span></div>
+    </div>`).join("");
+  return `<div class="radio-1col"><div class="ch" style="${cols}"><div>CH</div><div style="padding-left:32px;">Freq · MHz</div><div>Mod</div></div>${list}</div>`;
+}
+
+/* Radio — two columns (CH 0–9 / CH 10–19) */
+function radioBody2col(rows = D.radio) {
+  const colsA = "grid-template-columns: 130px 1fr 70px;";
+  const left  = rows.slice(0,10);
+  const right = rows.slice(10);
+  const block = (set) => `
+    <div class="ch" style="${colsA}"><div>CH</div><div>Freq · MHz</div><div>Mod</div></div>
+    ${set.map(([n,f])=>`
+      <div class="row tight" style="${colsA}">
+        <div><span class="slot">CH ${pad2(n)}</span></div>
+        <div><span class="freq">${f.toFixed(3)}</span></div>
+        <div><span class="mod">AM</span></div>
+      </div>`).join("")}
+  `;
+  return `<div class="radio-2col"><div class="col">${block(left)}</div><div class="col">${block(right)}</div></div>`;
+}
+
+/* CMDS */
+function cmdsBody(rows = D.cmds) {
+  const cols = "grid-template-columns: 1fr 110px;";
+  const list = rows.map(([k,v]) => `
+    <div class="row" style="${cols}">
+      <div><span class="name sm">${k}</span></div>
+      <div style="text-align:right;"><span class="val">${v}</span></div>
+    </div>`).join("");
+  return `<div class="ch" style="${cols}"><div>Parameter</div><div style="text-align:right;">Value</div></div>${list}`;
+}
+
+/* SPO-15 */
+function spoBody(rows = D.spo) {
+  const cols = "grid-template-columns: 100px 1fr 130px;";
+  const list = rows.map(r => {
+    const cls = r.st === "Lock" ? "st--lock" : r.st === "On" ? "st--on" : "st--off";
+    return `
+    <div class="row" style="${cols}">
+      <div><span class="cyr">${r.cyr}</span><span class="cyr-lat">(${r.lat})</span></div>
+      <div style="padding-left:28px;"><span class="name sm" style="color:var(--ink-2)">Threat type ${r.lat}</span></div>
+      <div style="text-align:right;"><span class="st ${cls}">${r.st}</span></div>
+    </div>`;
+  }).join("");
+  return `<div class="ch" style="${cols}"><div>Threat</div><div style="padding-left:28px;">Description</div><div style="text-align:right;">Status</div></div>${list}`;
+}
+
+/* ───────── Layout templates ───────── */
+function L1({ rsbnEmpty } = {}) {
+  const rsbn = rsbnEmpty
+    ? sec({ title:"RSBN", eyebrow:"NAVAID", headRight:"0 / 3", body: emptyBody("RSBN not programmed") })
+    : sec({ title:"RSBN", eyebrow:"NAVAID", headRight:`${D.rsbn.length} / ${D.rsbnCap}`, body: rsbnBody() });
+  return `
+    <div class="kb-mig L1">
+      ${header()}
+      <div class="grid">
+        <div class="g-wpt">${sec({ title:"Waypoints", eyebrow:"WPT", headRight:`${D.wpt.length} / ${D.wptCap}`, body: wptBody() })}</div>
+        <div class="g-ard">${sec({ title:"Airdromes", eyebrow:"ARD", headRight:`${D.ard.length} / ${D.ardCap}`, body: ardBody() })}</div>
+        <div class="g-rsbn">${rsbn}</div>
+        <div class="g-adf">${sec({ title:"ADF", eyebrow:"DIRECTION FINDER · Inner / Outer", headRight:`${D.adf.length} / 4`, body: adfBody() })}</div>
+        <div class="g-radio">${sec({ title:"Radio", eyebrow:"UHF / VHF presets", headRight:"20 / 20", body: radioBody1col() })}</div>
+        <div class="g-spo">${sec({ title:"SPO-15", eyebrow:"RWR LAUNCH WARN", headRight:`${D.spo.length} / 6`, body: spoBody() })}</div>
+        <div class="g-cmds">${sec({ title:"CMDS", eyebrow:"FLARE PROGRAM", headRight:"6 / 6", body: cmdsBody() })}</div>
+      </div>
+    </div>`;
+}
+
+function _unused_missionPanel() {
+  return `
+  <div style="padding: 22px 24px; display:flex; flex-direction:column; gap:18px; flex:1;">
+    <div>
+      <div style="font-family:var(--font-body); font-weight:700; font-size:13px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-2); margin-bottom:6px;">Active Program</div>
+      <div style="font-family:var(--font-display); font-weight:800; font-size:54px; line-height:1; letter-spacing:-0.005em;">Program 1</div>
+    </div>
+    <div style="border-top:1px dotted var(--rule); padding-top:14px;">
+      <div style="font-family:var(--font-body); font-weight:700; font-size:13px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-2); margin-bottom:6px;">Theatre</div>
+      <div style="font-family:var(--font-display); font-weight:800; font-size:36px; line-height:1; text-transform:uppercase;">Syria</div>
+    </div>
+    <div style="border-top:1px dotted var(--rule); padding-top:14px;">
+      <div style="font-family:var(--font-body); font-weight:700; font-size:13px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-2); margin-bottom:6px;">Generated</div>
+      <div style="font-family:var(--font-mono); font-weight:500; font-size:22px; line-height:1.25; color:var(--ink);">08 May 2026<br/>14:32 UTC</div>
+    </div>
+    <div style="margin-top:auto; border-top:1.5px solid var(--ink); padding-top:12px;">
+      <div style="font-family:var(--font-body); font-weight:700; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-2);">Crosscheck before taxi</div>
+    </div>
+  </div>`;
+}
+
+document.getElementById("m-L1").innerHTML = L1();
+document.getElementById("m-LE").innerHTML = L1({ rsbnEmpty: true });
+</script>
+</body>
+</html>
+
+<style id="__om-edit-overrides">
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(3) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(6) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(6) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-LE .g-adf .ch >div:nth-child(3) { font-size: 20px !important }
+#m-LE .g-adf .ch >div:nth-child(2) { font-size: 20px !important }
+#m-LE .g-adf .ch >div:nth-child(1) { font-size: 20px !important }
+#m-LE .g-wpt .ch >div:nth-child(1) { font-size: 20px !important }
+#m-LE .g-wpt .ch >div:nth-child(1) { font-size: 16px !important }
+#m-LE .g-adf .ch >div:nth-child(1) { font-size: 16px !important }
+#m-LE .g-adf .ch >div:nth-child(2) { font-size: 16px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(3) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(3) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(6) > div:nth-child(2) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(6) > div:nth-child(3) > span:nth-child(1) { font-size: 32px !important }
+#m-L1 .g-adf div:nth-child(3) .slot { font-weight: 300 !important }
+#m-L1 .g-adf div:nth-child(3) .slot { font-weight: 400 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 400 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 400 !important }
+#m-L1 .g-adf div:nth-child(6) .slot { font-weight: 400 !important }
+#m-L1 .g-adf div:nth-child(6) .slot { font-weight: 700 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 .g-adf div:nth-child(6) .slot { font-weight: 500 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 .g-adf div:nth-child(3) .slot { font-weight: 500 !important }
+#m-L1 .g-wpt div:nth-child(3) .slot { font-weight: 500 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 .g-ard div:nth-child(3) .slot { font-weight: 500 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-L1 .g-rsbn div:nth-child(3) .slot { font-weight: 500 !important }
+.g-rsbn div:nth-child(4) >div:nth-child(1) >:is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,blockquote,figcaption,label,span,a,em,strong,small,td,th,caption) { font-weight: 500 !important }
+.g-rsbn div:nth-child(5) >div:nth-child(1) >:is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,blockquote,figcaption,label,span,a,em,strong,small,td,th,caption) { font-weight: 500 !important }
+#m-LE .g-adf div:nth-child(3) .slot { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(4) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-LE .g-adf div:nth-child(6) .slot { font-weight: 500 !important }
+#m-LE .g-wpt div:nth-child(3) .slot { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-LE .g-ard div:nth-child(3) .slot { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > section:nth-child(1) > div:nth-child(4) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+#m-LE > div:nth-child(1) > div:nth-child(2) > div:nth-child(2) > section:nth-child(1) > div:nth-child(5) > div:nth-child(1) > span:nth-child(1) { font-weight: 500 !important }
+</style>

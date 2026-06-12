@@ -1,0 +1,42 @@
+name: CI
+
+# Generic syntax-floor CI for the DCS tooling repos. The same file is used in
+# every repo: each step skips itself when the repo has no files of that kind,
+# and the variant-sync check only runs where .github/variant-pairs.json exists.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lua syntax check (Lua 5.1, as embedded in DCS)
+        run: |
+          mapfile -t files < <(git ls-files '*.lua')
+          if [ "${#files[@]}" -eq 0 ]; then echo "No Lua files - skipped"; exit 0; fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends lua5.1
+          fail=0
+          for f in "${files[@]}"; do
+            luac5.1 -p "$f" || fail=1
+          done
+          if [ "$fail" -eq 0 ]; then echo "OK: ${#files[@]} Lua files parse"; fi
+          exit "$fail"
+
+      - name: Python syntax check
+        if: success() || failure()
+        run: |
+          mapfile -t files < <(git ls-files '*.py')
+          if [ "${#files[@]}" -eq 0 ]; then echo "No Python files - skipped"; exit 0; fi
+          python3 -m py_compile "${files[@]}"
+          echo "OK: ${#files[@]} Python files compile"
+
+      - name: Variant sync check
+        if: success() || failure()
+        run: |
+          if [ ! -f .github/variant-pairs.json ]; then echo "No variant pairs configured - skipped"; exit 0; fi
+          python3 .github/check_variants.py

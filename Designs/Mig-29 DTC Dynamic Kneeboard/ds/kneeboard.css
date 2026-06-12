@@ -1,0 +1,354 @@
+/* DCS Kneeboards Design System — kneeboard.css
+ * Layout primitives: filing-tab headers, pennants, page frames, data tables,
+ * map labels, country chips, and the runway / terrain pictogram fonts.
+ * --------------------------------------------------------------------------------
+ * Depends on colors_and_type.css being loaded first.
+ * -------------------------------------------------------------------------------- */
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-PAGE — the kneeboard sheet itself
+ *  A4-portrait-ish proportions (3:4). Designed to be embedded in a page or
+ *  a tablet frame at any size; the inside uses fixed-px scale so it stays
+ *  pixel-precise for screenshots.
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-page {
+  position: relative;
+  width: 768px;
+  aspect-ratio: 3 / 4;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Default header strip across the top of a kneeboard page */
+.kb-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: stretch;
+  gap: 0;
+  height: 44px;
+  border-bottom: 1.5px solid var(--ink);
+  background: transparent;
+}
+
+/* The dark "filing tab" used for page numbers and section headers
+ * Signature: a sharp 45° notch at the bottom-right corner. */
+.kb-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tab-bg);
+  color: var(--tab-fg);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-xl);
+  padding: 6px 18px 6px 14px;
+  position: relative;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+  letter-spacing: 0.02em;
+}
+.kb-tab--muted { background: var(--tab-bg-muted); }
+.kb-tab--page-num {
+  min-width: 56px;
+  font-size: var(--fs-2xl);
+  padding-left: 16px;
+  padding-right: 22px;
+}
+.kb-tab--inline {
+  display: inline-flex;
+  height: 28px;
+  font-size: var(--fs-sm);
+  padding: 4px 16px 4px 10px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+}
+.kb-tab--small {
+  height: 22px;
+  font-size: var(--fs-xs);
+  padding: 2px 14px 2px 8px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+/* Reverse-notched tab — used as a sub-section chip below the title
+ * Notch is at top-right. */
+.kb-subtab {
+  display: inline-flex;
+  align-items: center;
+  background: var(--tab-bg);
+  color: var(--tab-fg);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-md);
+  height: 24px;
+  padding: 0 14px 0 10px;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%);
+  letter-spacing: 0.04em;
+}
+
+/* Section title (sits in middle of header) */
+.kb-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--sp-5);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-3xl);
+  letter-spacing: var(--tracking-tight);
+  line-height: 1;
+  color: var(--ink);
+}
+.kb-title sup {
+  font-size: 0.45em;
+  font-weight: 600;
+  vertical-align: super;
+  margin-left: 4px;
+  color: var(--ink-2);
+}
+
+/* The yellow DimOn pennant — bottom-right notched flag */
+.kb-pennant {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pennant-bg);
+  color: var(--pennant-fg);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-md);
+  padding: 6px 18px 14px 14px;
+  position: relative;
+  /* Trapezoid pennant with bottom-right notch */
+  clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 14px) 100%, 0 100%);
+  letter-spacing: -0.01em;
+}
+.kb-pennant .em { color: var(--ink); font-weight: 800; }
+.kb-pennant .em + .light { font-weight: 500; }
+
+/* Simple horizontal hairline used between body sections */
+.kb-rule {
+  border: 0;
+  border-top: 1px solid var(--ink);
+  margin: 0;
+}
+.kb-rule--soft { border-top-color: var(--rule); }
+.kb-rule--dotted {
+  border-top: 0;
+  background-image: linear-gradient(to right, var(--rule) 0 50%, transparent 50% 100%);
+  background-size: 6px 1px;
+  background-repeat: repeat-x;
+  height: 1px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-DATA-TABLE — the dense aerodrome data row layout
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+.kb-table tr + tr td {
+  border-top: 1px dotted var(--rule);
+}
+.kb-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.kb-table .num {
+  width: 28px;
+  color: var(--ink-2);
+  text-align: right;
+  padding-right: 6px;
+}
+.kb-table .name {
+  font-family: var(--font-body);
+  font-weight: 700;
+}
+.kb-table .icao {
+  color: var(--ink-2);
+  font-size: 0.9em;
+  margin-left: 4px;
+}
+.kb-table .ctry {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.kb-table .coord { color: var(--data-navy); }
+
+/* Vertical column gutters — dotted, like the PDF */
+.kb-table .col-sep {
+  border-left: 1px dotted var(--rule);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-CARD — for floating map labels and index thumbnails
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-label {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-elev);
+  border-radius: 4px;
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  border-top: 2px solid var(--data-blue);
+}
+.kb-label__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 0 6px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--ink);
+}
+.kb-label__body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+.kb-label__name { font-family: var(--font-body); font-weight: 700; color: var(--ink); }
+
+.kb-label--ru { border-top-color: var(--data-orange); }
+.kb-label--ge { border-top-color: var(--data-blue); }
+.kb-label--ab { border-top-color: var(--data-green-2); }
+.kb-label--us { border-top-color: var(--ink-muted); }
+
+/* Country dot chip (legend list) */
+.kb-ctry-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-xxs);
+  letter-spacing: var(--tracking-x-wide);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.kb-ctry-chip::before {
+  content: "";
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.kb-ctry-chip[data-c="ru"]::before { background: var(--data-orange); }
+.kb-ctry-chip[data-c="ge"]::before { background: var(--data-blue); }
+.kb-ctry-chip[data-c="ab"]::before { background: var(--data-green-2); }
+.kb-ctry-chip[data-c="us"]::before { background: var(--ink-muted); }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-CALLOUT — light "tip" panel used at page bottoms
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-callout {
+  background: var(--paper-2);
+  padding: var(--sp-5) var(--sp-6);
+  border-radius: var(--r-3);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+.kb-callout strong { font-weight: 700; }
+
+/* "Year range" inline chips that highlight the current era */
+.kb-year-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink);
+}
+.kb-year-chip[data-active="true"] {
+  background: var(--paper-3);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-INDEX-CARD — used on the cover for region thumbnails
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-index {
+  display: flex;
+  flex-direction: column;
+  width: 110px;
+  height: 130px;
+  background: var(--bg-elev);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  position: relative;
+}
+.kb-index__head {
+  background: var(--ink);
+  color: var(--tab-fg);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: 8px 6px 12px 6px;
+  line-height: 1.1;
+  position: relative;
+  /* Notch the bottom-left of the header strip */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%, 0 calc(100% - 12px));
+}
+.kb-index__head--muted { background: var(--ink-muted); font-style: italic; }
+.kb-index__map {
+  flex: 1;
+  background-color: var(--paper-2);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+.kb-index__pgnum {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-md);
+  border-radius: 4px;
+  padding: 2px 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  /* Slight notch on the top-left */
+  clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  KB-FOOTER — small metadata strip at page bottom
+ * ────────────────────────────────────────────────────────────────────────────── */
+.kb-footer {
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-5);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+/* Tracked uppercase metadata line */
+.kb-meta-line {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-x-wide);
+  color: var(--ink-2);
+}

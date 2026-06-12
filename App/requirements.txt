@@ -1,0 +1,33 @@
+# DCS MiG-29 DTC Kneeboard Utility - runtime dependencies
+#
+# These are the ONLY third-party packages the app uses; everything else is
+# Python stdlib (see spec section 9). Keep this list minimal: it defines what
+# PyInstaller bundles into the single exe.
+#
+# Per-module usage so far:
+#   beacon_parser.py   -> slpp                 (Lua beacons.lua -> dict)
+#   bin_parser.py      -> (stdlib only)        (binary temp file -> JSON)
+#   dtc_processor.py   -> (stdlib only)        (DTC JSON -> display values)
+#   kneeboard_renderer.py -> Pillow            (image generation; TTFs in fonts/)
+#   config.py          -> (stdlib only)        (config + path auto-detection)
+#   hook_manager.py    -> (stdlib only)        (installs/updates hook_template.lua)
+#   trigger_watcher.py -> (stdlib only)        (poll trigger -> run the pipeline)
+#   main.py            -> customtkinter, pystray  (GUI + system tray)
+#   app_icon.py        -> Pillow                  (programmatic tray/window icon)
+#
+# Packaging note: hook_template.lua and the fonts/ directory are DATA files, not
+# Python imports, so PyInstaller will not pick them up automatically. Bundle them
+# explicitly, e.g.:  --add-data "hook_template.lua:." --add-data "fonts:fonts"
+# (hook_manager and kneeboard_renderer already resolve sys._MEIPASS at runtime).
+#
+# beacons.lua / slpp note for the larger app build:
+#   slpp CANNOT decode a raw beacons.lua - it is a Lua *script* (dofile/require/
+#   local statements, gettext _('NAME') wrappers, bare BEACON_TYPE_* constants,
+#   ';' field separators), not a table literal. beacon_parser.py preprocesses the
+#   extracted table before handing it to slpp, and falls back to a pure-regex
+#   parser if slpp is missing or raises. Full write-up: ../docs/beacon-parser-findings.md.
+
+customtkinter>=5.2.0
+Pillow>=10.0.0
+slpp>=1.2.3
+pystray>=0.19.0

@@ -1,0 +1,32 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- Virtual environment (machine-specific; recreate with python -m venv) ---
+.venv/
+venv/
+
+# --- Tooling caches ---
+.ruff_cache/
+.pytest_cache/
+
+# --- PyInstaller build output ---
+/App/build/
+/App/dist/
+
+# --- App runtime files (machine-specific; generated at run time) ---
+/App/config.json
+/App/dtc_kneeboard_utility.log
+/App/test_output/
+
+# --- Large local-only material (kept on disk, not version-controlled) ---
+/Crash Logs/
+/Probe logs/
+
+# --- Local test fixtures (DCS-owned content, e.g. beacons.lua samples) ---
+/App/test files/fixtures
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db

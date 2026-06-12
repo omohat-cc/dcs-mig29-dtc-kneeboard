@@ -1,0 +1,232 @@
+/* DCS Kneeboards Design System
+ * Colors & Type — derived from "Aerodrome Data and Frequencies" by DimOn (Dima Kozyrev)
+ * --------------------------------------------------------------------------------
+ * The visual language is a flight-sim kneeboard: a quiet warm-cream paper, dense
+ * monospace data tables, sharp notched "filing-tab" headers, and a single yellow
+ * brand pennant. Color is INFORMATION — every hue means something specific.
+ * -------------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400;1,500&display=swap');
+
+:root {
+  /* ────────────────────────────────────────────────────────────────────────────
+   *  COLOR — base palette
+   * ──────────────────────────────────────────────────────────────────────────── */
+
+  /* Surfaces: warm off-white "kneeboard paper" */
+  --paper:        #f3f1ec;   /* page background */
+  --paper-2:      #e8e4dc;   /* secondary fills, footer band, callouts */
+  --paper-3:      #dcd6c8;   /* card lift, gentle highlight */
+  --rule:         #c8c2b6;   /* dotted dividers, hairlines */
+  --rule-dim:     #d8d3c7;   /* very faint rule */
+
+  /* Ink: dark UI / typography */
+  --ink:          #15171a;   /* body text, dark headers ("filing-tab") */
+  --ink-2:        #2c2f35;   /* secondary dark */
+  --ink-muted:    #6b6f78;   /* muted dark — used for secondary tabs ("Legends") */
+  --ink-3:        #8a8e95;   /* tertiary text (closed/inoperative) */
+
+  /* Brand */
+  --brand-yellow:    #f7d046;  /* the DimOn pennant */
+  --brand-yellow-2:  #ffe06b;  /* highlight */
+  --brand-amber:     #d9a722;  /* magvar isolines on maps, warm accent */
+
+  /* Data colors — each carries domain meaning */
+  --data-navy:    #1f3a8a;   /* coordinates (primary blue) */
+  --data-blue:    #1f5fa0;   /* PRMG channel, secondary blue, country=GE */
+  --data-sky:     #62a3d6;   /* RSBN (italic blue) */
+  --data-magenta: #b51c7a;   /* VOR/DME frequency */
+  --data-brown:   #8a5a1f;   /* NDB frequency, dirt-runway color */
+  --data-ochre:   #c89244;   /* hill iconography */
+  --data-teal:    #1c7a78;   /* grass-runway color, water on maps */
+  --data-green:   #1f8a3f;   /* ILS frequency */
+  --data-red:     #c1273b;   /* warnings, short-runway flags, errors */
+  --data-orange:  #e26a1a;   /* country=RU dot */
+  --data-green-2: #2e9b3e;   /* country=AB dot */
+
+  /* ────────────────────────────────────────────────────────────────────────────
+   *  COLOR — semantic aliases
+   * ──────────────────────────────────────────────────────────────────────────── */
+  --bg:           var(--paper);
+  --bg-elev:      #ffffff;            /* the floating label cards on maps */
+  --fg:           var(--ink);
+  --fg-2:         var(--ink-2);
+  --fg-muted:     var(--ink-muted);
+  --fg-dim:       var(--ink-3);
+
+  --tab-bg:       var(--ink);          /* primary filing-tab fill */
+  --tab-bg-muted: var(--ink-muted);    /* "Legends" / "Extras" tabs */
+  --tab-fg:       #ffffff;
+  --pennant-bg:   var(--brand-yellow);
+  --pennant-fg:   var(--ink);
+
+  --warn:         var(--data-red);
+  --ok:           var(--data-green);
+
+  /* ────────────────────────────────────────────────────────────────────────────
+   *  TYPE — families
+   * ──────────────────────────────────────────────────────────────────────────── */
+
+  /* Display / titles — heavy condensed sans (PDF uses something Barlow-Condensed-ish) */
+  --font-display: "Barlow Condensed", "Oswald", "Arial Narrow", system-ui, sans-serif;
+  /* Body — humanist sans for explanatory copy */
+  --font-body:    "Barlow", "Inter", system-ui, -apple-system, sans-serif;
+  /* Mono — ALL data, coordinates, frequencies, ICAO codes */
+  --font-mono:    "JetBrains Mono", "Roboto Mono", "IBM Plex Mono", ui-monospace, "Consolas", monospace;
+
+  /* ────────────────────────────────────────────────────────────────────────────
+   *  TYPE — scale (kneeboard pages target ~150 DPI portrait at 1536×2048)
+   * ──────────────────────────────────────────────────────────────────────────── */
+  --fs-xxs:   10px;
+  --fs-xs:    11px;
+  --fs-sm:    12px;
+  --fs-md:    14px;
+  --fs-lg:    16px;
+  --fs-xl:    18px;
+  --fs-2xl:   22px;
+  --fs-3xl:   28px;
+  --fs-4xl:   36px;
+  --fs-5xl:   48px;
+  --fs-6xl:   64px;
+
+  --lh-tight:  1.05;
+  --lh-snug:   1.20;
+  --lh-normal: 1.45;
+  --lh-loose:  1.6;
+
+  --tracking-tight:  -0.01em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.04em;
+  --tracking-x-wide:  0.12em;  /* tracked uppercase eyebrows */
+
+  /* ────────────────────────────────────────────────────────────────────────────
+   *  SPACING & RADII (intentionally small/sharp — this is a technical document)
+   * ──────────────────────────────────────────────────────────────────────────── */
+  --sp-0:  2px;
+  --sp-1:  4px;
+  --sp-2:  6px;
+  --sp-3:  8px;
+  --sp-4:  12px;
+  --sp-5:  16px;
+  --sp-6:  20px;
+  --sp-7:  24px;
+  --sp-8:  32px;
+  --sp-9:  48px;
+  --sp-10: 64px;
+
+  --r-0:  0px;
+  --r-1:  2px;
+  --r-2:  4px;
+  --r-3:  8px;
+  --r-4:  12px;
+  --r-pill: 999px;
+
+  /* The signature 45° notch — used on filing tabs / pennants */
+  --notch:        12px;
+  --notch-sm:     8px;
+  --notch-lg:     16px;
+
+  /* Shadows — minimal. Real kneeboards are matte. */
+  --shadow-card:  0 1px 0 rgba(0,0,0,0.04), 0 4px 12px rgba(20,20,20,0.06);
+  --shadow-tab:   0 1px 0 rgba(0,0,0,0.05), 0 2px 6px rgba(0,0,0,0.10);
+  --shadow-pop:   0 6px 20px rgba(0,0,0,0.12);
+
+  --border-strong: 1px solid var(--ink);
+  --border-med:    1px solid var(--rule);
+  --border-soft:   1px solid var(--rule-dim);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ *  SEMANTIC ELEMENT STYLES
+ *  Use these by adding the class OR by relying on the bare element selectors
+ *  inside `.kb` (kneeboard) scopes.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
+.kb, .kb-page {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.kb h1, .kb-h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-5xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  text-transform: uppercase;
+  margin: 0;
+}
+.kb h2, .kb-h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+.kb h3, .kb-h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+.kb h4, .kb-h4 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-lg);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+.kb p, .kb-p {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  margin: 0 0 var(--sp-4) 0;
+}
+.kb code, .kb-code, .kb-data {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  font-variant-ligatures: none;
+}
+.kb-eyebrow {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-xxs);
+  letter-spacing: var(--tracking-x-wide);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.kb-caps {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: 700;
+}
+.kb-italic-note {
+  font-style: italic;
+  color: var(--ink-2);
+}
+.kb-strike {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  color: var(--ink-3);
+}
+
+/* Data-color utility classes — match PDF's information color scheme exactly */
+.d-coord    { color: var(--data-navy);    font-family: var(--font-mono); }
+.d-vor      { color: var(--data-magenta); font-family: var(--font-mono); }
+.d-ndb      { color: var(--data-brown);   font-family: var(--font-mono); }
+.d-tacan    { color: var(--ink);          font-family: var(--font-mono); font-style: italic; }
+.d-rsbn     { color: var(--data-sky);     font-family: var(--font-mono); font-style: italic; }
+.d-ils      { color: var(--data-green);   font-family: var(--font-mono); }
+.d-prmg     { color: var(--data-blue);    font-family: var(--font-mono); }
+.d-flag     { color: var(--data-red);     font-family: var(--font-mono); }
+.d-paved    { color: var(--ink);          font-family: var(--font-mono); }
+.d-dirt     { color: var(--data-brown);   font-family: var(--font-mono); }
+.d-grass    { color: var(--data-teal);    font-family: var(--font-mono); }
+.d-faded    { opacity: 0.45; }

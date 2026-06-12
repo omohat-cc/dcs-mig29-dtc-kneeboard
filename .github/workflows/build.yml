@@ -1,0 +1,92 @@
+# Test and build the Windows exe.
+#
+# Triggers:
+#   * manually (Run workflow button) -> exe uploaded as a workflow artifact
+#   * pushing a tag like v1.0.0      -> exe attached to a draft GitHub release
+#
+# The exe is a PyInstaller --onefile build, exactly as described in App/BUILD.md.
+
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # needed by `gh release create` on tag builds
+
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: App/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run test suite
+        # Each test file is a standalone script that exits non-zero on failure.
+        # Checks needing local-only fixtures (real beacons.lua / DTC captures)
+        # skip cleanly on the runner.
+        run: |
+          $failed = $false
+          foreach ($f in Get-ChildItem "test files" -Filter "test_*.py") {
+            Write-Host "`n=== $($f.Name) ===" -ForegroundColor Cyan
+            python $f.FullName
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: App/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Build exe
+        run: pyinstaller DCS_DTC_Kneeboard.spec --noconfirm --clean
+
+      - name: Smoke-check the exe exists
+        run: |
+          if (-not (Test-Path "dist/DCS_DTC_Kneeboard.exe")) { exit 1 }
+          Get-Item "dist/DCS_DTC_Kneeboard.exe" | Format-List Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DCS_DTC_Kneeboard-win64
+          path: App/dist/DCS_DTC_Kneeboard.exe
+          if-no-files-found: error
+
+      - name: Attach to draft release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$env:GITHUB_REF_NAME" "dist/DCS_DTC_Kneeboard.exe"
+          --draft --generate-notes --title "$env:GITHUB_REF_NAME"

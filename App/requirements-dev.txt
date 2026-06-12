@@ -1,0 +1,7 @@
+# Development / test tooling (NOT bundled into the exe).
+# Install with:  pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.0.0      # test_beacon_parser.py etc. also run standalone via __main__
+ruff>=0.6.0        # linting (run: ruff check .)
+pyinstaller>=6.0.0 # packaging: pyinstaller --onefile (spec section 7)
