@@ -1,3 +1,4 @@
+<img width="1536" height="2048" alt="000_dtc_config" src="https://github.com/user-attachments/assets/37d43960-d26b-4482-8707-bc5b44a5b905" />
 # DCS MiG-29A DTC Kneeboard Utility
 
 Auto-generates a kneeboard page summarising your MiG-29A's Data Transfer
