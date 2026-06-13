@@ -313,11 +313,39 @@ def run_edge_cases(checks: Checks) -> None:
         checks.check("Non-existent file -> returns None", missing_file_result is None)
 
 
+def run_newest_copy_selection(checks: Checks) -> None:
+    """A file with several DTC copies extracts the NEWEST (last complete) one.
+
+    DCS appends a fresh copy each time the cartridge changes, so the latest
+    config is the last copy in the file. Extracting the first copy (the old
+    behaviour) meant a mid-session DTC change was never picked up.
+    """
+    old = '{"data": {"SelectedProgram": "Program_1", "name": "OLD", "type": "MiG-29 Fulcrum"}}'
+    new = '{"data": {"SelectedProgram": "Program_1", "name": "NEW", "type": "MiG-29 Fulcrum"}}'
+    with tempfile.TemporaryDirectory() as tmp:
+        # Two complete copies, oldest first -> must return the newest.
+        f1 = Path(tmp) / "~tr0000A001.bin"
+        f1.write_bytes(b"\x00\x01" + old.encode() + b"\x00\x00" + new.encode() + b"\x00")
+        r1 = extract_json_from_bin(f1)
+        name1 = (r1 or {}).get("data", {}).get("name")
+        checks.check("Multiple copies -> newest (last) copy returned", name1 == "NEW", str(name1))
+
+        # The final copy is truncated mid-write -> fall back to the previous one.
+        truncated = '{"data": {"SelectedProgram": "Program_1", "name": "NEW", "type": "MiG-29'
+        f2 = Path(tmp) / "~tr0000A002.bin"
+        f2.write_bytes(b"\x00" + old.encode() + b"\x00" + truncated.encode() + b"\x00")
+        r2 = extract_json_from_bin(f2)
+        name2 = (r2 or {}).get("data", {}).get("name")
+        checks.check("Truncated last copy -> falls back to previous complete copy",
+                     name2 == "OLD", str(name2))
+
+
 def main() -> int:
     checks = Checks()
     run_sample_directory(checks)
     run_root_sample_file(checks)
     run_edge_cases(checks)
+    run_newest_copy_selection(checks)
     return 0 if checks.summary() else 1
 
 

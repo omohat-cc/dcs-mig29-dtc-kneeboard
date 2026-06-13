@@ -148,19 +148,6 @@ def _make_sandbox(root: Path, *, with_beacons: bool = False, with_bin: bool = Fa
     )
 
 
-def _watcher(cfg: config.AppConfig, tmp: object, **kwargs) -> trigger_watcher.TriggerWatcher:
-    """Build a watcher whose dedupe sidecar lives in the sandbox under ``tmp``.
-
-    Without an explicit ``state_dir`` the sidecar would land in the real App
-    directory (next to config.json), which would both litter the repo and let
-    one test's fingerprint suppress another's render. Tests always go through
-    this so the state stays inside the temporary directory.
-    """
-    state = Path(tmp) / "app_state"
-    state.mkdir(parents=True, exist_ok=True)
-    return trigger_watcher.TriggerWatcher(cfg, state_dir=state, **kwargs)
-
-
 # Distinct sentinel for "generate this automatically" (so None can mean "omit").
 _AUTO = object()
 
@@ -218,7 +205,7 @@ def test_full_pipeline_via_watcher(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_beacons=True, with_bin=True)
         trigger = _write_trigger(cfg)
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
 
         output = watcher.poll_once()
 
@@ -240,7 +227,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     # --- absent trigger: poll is a harmless no-op ---------------------------
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp))
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         checks.check("No trigger file -> poll_once returns None",
                      watcher.poll_once() is None)
 
@@ -248,7 +235,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         trigger = _write_trigger(cfg, age_minutes=10.0)
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         output = watcher.poll_once()
         expected = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
         checks.check("Stale trigger -> poll_once returns None", output is None)
@@ -259,7 +246,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         trigger = _write_trigger(cfg, body="{ this is not valid json ")
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         checks.check("Malformed trigger -> poll_once returns None",
                      watcher.poll_once() is None)
         checks.check("Malformed trigger -> file consumed", not trigger.exists())
@@ -269,7 +256,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = _make_sandbox(Path(tmp), with_bin=True)
             _write_trigger(cfg, timestamp=None)
-            watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+            watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
             output = watcher.poll_once()
             checks.check("Trigger without timestamp -> still processed",
                          output is not None and output.is_file(), str(output))
@@ -361,7 +348,7 @@ def test_dedupe_unchanged(checks: Checks) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
         bin_path = Path(cfg.dcs_temp_path) / REAL_BIN.name
 
@@ -416,8 +403,8 @@ def test_dedupe_unchanged(checks: Checks) -> None:
 
 
 def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
-    """The dedupe holds through poll_once and survives a watcher restart (sidecar)."""
-    _banner("DEDUPE  -  poll_once path + sidecar persistence across restart")
+    """In-memory dedupe holds within a session; a fresh watcher re-renders; no sidecar."""
+    _banner("DEDUPE  -  poll_once path; in-memory only (restart re-renders)")
     if not REAL_BIN.is_file():
         checks.skip("DTC dedupe (poll/restart)", f"sample .bin not found at {REAL_BIN}")
         return
@@ -426,7 +413,7 @@ def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
 
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         _write_trigger(cfg)
         first = watcher.poll_once()
         checks.check("poll_once first renders", first is not None, str(first))
@@ -440,49 +427,37 @@ def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
             (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
         )
 
-        # The sidecar lives in the app state dir, not the kneeboard folder.
-        sidecar = Path(tmp) / "app_state" / trigger_watcher.SIDECAR_NAME
-        checks.check("Dedupe sidecar written to app state dir", sidecar.is_file(),
-                     str(sidecar))
-        checks.check("No sidecar left in the kneeboard folder",
+        # The dedupe is in-memory only: no fingerprint file is written anywhere.
+        checks.check("No fingerprint sidecar in the kneeboard folder",
                      not list(output.parent.glob("*.fingerprint.json")))
 
-        # A brand-new watcher (simulating an app restart) loads the sidecar and
-        # still recognises the unchanged DTC, so it does not regenerate.
-        restarted = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        # A brand-new watcher (simulating an app restart) does NOT remember the
+        # last render, so the first spawn renders again - it can never get stuck.
+        restarted = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         again = restarted.generate_kneeboard()
-        checks.check("Restarted watcher skips unchanged DTC (persisted)", again is None)
-        checks.check(
-            "Restarted watcher did not rewrite the JPEG",
-            (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
-        )
+        checks.check("Restarted watcher re-renders (no persistence)", again is not None,
+                     str(again))
 
 
-def test_sidecar_location_and_cleanup(checks: Checks) -> None:
-    """The dedupe sidecar lives in the app state dir; a legacy one is cleaned up."""
-    _banner("DEDUPE  -  sidecar location + legacy cleanup")
+def test_legacy_sidecar_cleanup(checks: Checks) -> None:
+    """A stale fingerprint sidecar from an earlier build is deleted on generate."""
+    _banner("DEDUPE  -  legacy sidecar cleanup")
     if not REAL_BIN.is_file():
-        checks.skip("Sidecar location", f"sample .bin not found at {REAL_BIN}")
+        checks.skip("Legacy sidecar cleanup", f"sample .bin not found at {REAL_BIN}")
         return
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
-
-        # Plant a legacy sidecar beside the JPEG (where the first version wrote it).
         output.parent.mkdir(parents=True, exist_ok=True)
-        legacy = output.with_name(output.stem + ".fingerprint.json")
+        legacy = output.with_name(output.stem + trigger_watcher.LEGACY_SIDECAR_SUFFIX)
         legacy.write_text('{"fingerprint": "stale"}', encoding="utf-8")
 
-        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
         result = watcher.generate_kneeboard()
         checks.check("Generated a kneeboard", result is not None, str(result))
-
-        new_sidecar = Path(tmp) / "app_state" / trigger_watcher.SIDECAR_NAME
-        checks.check("Sidecar written to the app state dir", new_sidecar.is_file(),
-                     str(new_sidecar))
-        checks.check("Legacy kneeboard-folder sidecar removed", not legacy.exists())
-        checks.check("No .fingerprint.json left beside the kneeboard",
+        checks.check("Legacy sidecar removed from the kneeboard folder", not legacy.exists())
+        checks.check("No .fingerprint.json beside the kneeboard",
                      not list(output.parent.glob("*.fingerprint.json")))
 
 
@@ -495,7 +470,9 @@ def test_watcher_thread(checks: Checks) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_beacons=True, with_bin=True)
-        watcher = _watcher(cfg, tmp, poll_interval=0.05, post_trigger_delay=0.0)
+        watcher = trigger_watcher.TriggerWatcher(
+            cfg, poll_interval=0.05, post_trigger_delay=0.0
+        )
         expected = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
 
         checks.check("Not running before start()", not watcher.is_running())
@@ -542,7 +519,7 @@ def main() -> int:
     test_direct_dtc_pipeline(checks)
     test_dedupe_unchanged(checks)
     test_dedupe_via_poll_and_restart(checks)
-    test_sidecar_location_and_cleanup(checks)
+    test_legacy_sidecar_cleanup(checks)
     test_watcher_thread(checks)
     test_output_path_spec(checks)
     return 0 if checks.summary() else 1

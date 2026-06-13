@@ -38,8 +38,8 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from beacon_parser import BeaconResolver
-from bin_parser import extract_dtc_from_directory_with_source
-from config import AppConfig, app_directory
+from bin_parser import extract_dtc_from_directory
+from config import AppConfig
 from dtc_processor import DTCProcessingError, ProcessedDTC, process_dtc
 from kneeboard_renderer import KneeboardRenderError, render_kneeboard
 
@@ -59,23 +59,10 @@ TRIGGER_SUBPATH = ("Logs", "dtc_kneeboard_trigger.json")
 # The "000_" prefix sorts the page first in DCS's kneeboard page order.
 OUTPUT_SUBPATH = ("Kneeboard", "MiG-29 Fulcrum", "000_dtc_config.jpg")
 
-# Dedupe state sidecar. It records the fingerprint (and source-file identity) of
-# the last render so the dedupe survives an app restart. It lives in the app's
-# own directory (next to config.json), NOT in the DCS kneeboard folder, so a
-# player never sees a stray working file among their kneeboard pages.
-SIDECAR_NAME = "dtc_kneeboard_dedupe.json"
-# Where the first version wrote it (beside the output JPEG). Cleaned up on sight
-# so upgrading does not leave an orphan in the kneeboard folder.
-_LEGACY_SIDECAR_SUFFIX = ".fingerprint.json"
-
-
-def _format_mtime_ns(mtime_ns: int) -> str:
-    """Format a nanosecond mtime as a short UTC timestamp, for diagnostic logs."""
-    try:
-        seconds = mtime_ns / 1_000_000_000
-        return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    except (OverflowError, OSError, ValueError):
-        return str(mtime_ns)
+# An earlier build wrote a dedupe fingerprint into this file beside the output
+# JPEG. The dedupe is now in-memory only, so any such file is stale; it is
+# deleted on sight so it never lingers in the player's kneeboard folder.
+LEGACY_SIDECAR_SUFFIX = ".fingerprint.json"
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +138,6 @@ class TriggerWatcher:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         post_trigger_delay: float = DEFAULT_POST_TRIGGER_DELAY,
         max_trigger_age: float = DEFAULT_MAX_TRIGGER_AGE,
-        state_dir: Optional[PathLike] = None,
     ) -> None:
         """Args:
             config: Loaded application configuration (supplies the DCS paths).
@@ -162,26 +148,23 @@ class TriggerWatcher:
                 scanning temp files (lets DCS finish writing them).
             max_trigger_age: Triggers with a timestamp older than this (seconds)
                 are discarded as stale.
-            state_dir: Directory for the dedupe sidecar. Defaults to the app's
-                own directory (next to config.json); tests inject a sandbox so
-                they never touch the real config location.
         """
         self._config = config
         self._log_callback = log_callback
         self._poll_interval = poll_interval
         self._post_trigger_delay = post_trigger_delay
         self._max_trigger_age = max_trigger_age
-        self._state_dir = Path(state_dir) if state_dir else None
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._resolver = self._build_resolver(config)
 
         # Dedupe state (see generate_kneeboard): the content fingerprint of the
-        # last kneeboard rendered. Held in memory and mirrored to the sidecar so
-        # it survives an app restart.
+        # last kneeboard rendered, held in memory only. It is deliberately not
+        # persisted - each app launch starts fresh, so the first spawn always
+        # renders and the dedupe can never get "stuck" across sessions.
         self._last_fingerprint: Optional[str] = None
-        self._state_loaded = False
+        self._legacy_sidecar_cleaned = False
 
     # --- construction helpers ---------------------------------------------
     @staticmethod
@@ -366,19 +349,15 @@ class TriggerWatcher:
     ) -> Optional[Path]:
         """Run the full extract -> process -> resolve -> render pipeline once.
 
-        A content fingerprint avoids needless re-rendering, which is wasteful
-        and, on lower-spec PCs, can briefly stutter DCS (the Pillow draw + JPEG
-        encode runs on this background thread). After extracting and resolving
-        the DTC, its fully resolved form is hashed; if the hash matches the last
-        image rendered, the render is skipped. ``ProcessedDTC.to_dict()`` carries
-        no render timestamp, so an identical DTC hashes identically, while a
-        genuine DTC edit changes the hash and always regenerates.
-
-        Note this dedupes on the *extracted* DTC content, so it only suppresses a
-        render when what we read from the temp files is genuinely unchanged. If a
-        DTC edit is not reflected in the temp file we read (or lands in a file we
-        do not select), the content looks unchanged and no new page is drawn -
-        the candidate diagnostics logged below exist to surface exactly that.
+        After extracting and resolving the DTC, its fully resolved form is hashed
+        and compared to the last kneeboard rendered (this session). If the hash
+        matches, the render is skipped - this avoids needless re-rendering, which
+        is wasteful and, on lower-spec PCs, can briefly stutter DCS, and in
+        multiplayer the hook can re-fire the trigger repeatedly for one DTC.
+        ``ProcessedDTC.to_dict()`` carries no render timestamp, so an identical
+        DTC hashes identically while a genuine edit changes the hash and always
+        regenerates. The fingerprint is in-memory only (not persisted), so the
+        first spawn after each launch always renders.
 
         Args:
             trigger_data: The parsed trigger (informational only; logged). The
@@ -406,21 +385,14 @@ class TriggerWatcher:
         if trigger_data and trigger_data.get("aircraft"):
             self._log(f"Trigger aircraft: {trigger_data.get('aircraft')}")
 
-        self._ensure_state_loaded()
+        self._cleanup_legacy_sidecar(output)
 
         try:
             self._log(f"Scanning temp files in {temp} ...")
-            parsed, source = extract_dtc_from_directory_with_source(temp)
+            parsed = extract_dtc_from_directory(temp)
             if parsed is None:
                 self._log("No DTC data found in temp files; aborting this trigger.", logging.ERROR)
                 return None
-
-            signature = self._source_signature(source)
-            if source is not None and signature is not None:
-                self._log(
-                    f"DTC source: {source.name} ({signature[2]} bytes, "
-                    f"modified {_format_mtime_ns(signature[1])})."
-                )
 
             processed = process_dtc(parsed)
             self._log(
@@ -434,19 +406,13 @@ class TriggerWatcher:
 
             # --- content fingerprint dedupe (after full resolution) ---------
             fingerprint = self._compute_fingerprint(processed)
-            last = self._last_fingerprint
-            self._log(
-                f"DTC fingerprint {fingerprint[:12]} "
-                f"(previous {last[:12] if last else 'none'})."
-            )
-            if not force and fingerprint == last and output.is_file():
+            if not force and fingerprint == self._last_fingerprint and output.is_file():
                 self._log("DTC unchanged; kneeboard not regenerated.")
                 return None
 
             written = render_kneeboard(processed, output)  # logs "Kneeboard generated -> ..."
-            # Record what we just rendered so future identical triggers dedupe.
+            # Remember what we just rendered so identical respawns dedupe.
             self._last_fingerprint = fingerprint
-            self._persist_state(fingerprint, signature)
             return Path(written)
 
         except DTCProcessingError as exc:
@@ -462,75 +428,23 @@ class TriggerWatcher:
 
     # --- dedupe helpers ----------------------------------------------------
     @staticmethod
-    def _source_signature(source: Optional[Path]) -> Optional[tuple[str, int, int]]:
-        """Return (path, mtime_ns, size) for the source ``.bin``, or ``None``.
-
-        Recorded in the sidecar purely as provenance (which temp file produced
-        the current kneeboard); it is not used for the dedupe decision.
-        """
-        if source is None:
-            return None
-        try:
-            stat = source.stat()
-        except OSError:
-            return None
-        return (str(source), stat.st_mtime_ns, stat.st_size)
-
-    @staticmethod
     def _compute_fingerprint(processed: ProcessedDTC) -> str:
         """Return a stable SHA-256 over the resolved DTC's serialised content."""
         payload = json.dumps(processed.to_dict(), sort_keys=True).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    def _sidecar_path(self) -> Path:
-        """Path to the dedupe sidecar in the app's state directory."""
-        base = self._state_dir or app_directory()
-        return base / SIDECAR_NAME
-
-    def _legacy_sidecar_path(self) -> Optional[Path]:
-        """Old sidecar location (beside the output JPEG), for migration/cleanup."""
-        output = self.output_path
-        return output.with_name(output.stem + _LEGACY_SIDECAR_SUFFIX) if output else None
-
-    def _ensure_state_loaded(self) -> None:
-        """Lazily load the persisted fingerprint (once per run).
-
-        Reads the current sidecar; failing that, migrates from the legacy
-        beside-the-JPEG location so the dedupe is not lost across the upgrade.
-        """
-        if self._state_loaded:
+    def _cleanup_legacy_sidecar(self, output: Path) -> None:
+        """Delete a stale fingerprint sidecar left by an earlier build (once)."""
+        if self._legacy_sidecar_cleaned:
             return
-        self._state_loaded = True
-        for sidecar in (self._sidecar_path(), self._legacy_sidecar_path()):
-            if sidecar is None:
-                continue
-            try:
-                if not sidecar.is_file():
-                    continue
-                data = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                logger.debug("Could not load dedupe state from %s: %s", sidecar, exc)
-                continue
-            if isinstance(data, dict) and isinstance(data.get("fingerprint"), str):
-                self._last_fingerprint = data["fingerprint"]
-                logger.debug("Loaded dedupe fingerprint from %s", sidecar)
-                return
-
-    def _persist_state(self, fingerprint: str, signature: Optional[tuple[str, int, int]]) -> None:
-        """Best-effort write of the dedupe state, and cleanup of the legacy file."""
-        sidecar = self._sidecar_path()
-        payload = {"fingerprint": fingerprint, "source": list(signature) if signature else None}
+        self._legacy_sidecar_cleaned = True
+        legacy = output.with_name(output.stem + LEGACY_SIDECAR_SUFFIX)
         try:
-            sidecar.parent.mkdir(parents=True, exist_ok=True)
-            sidecar.write_text(json.dumps(payload), encoding="utf-8")
+            if legacy.is_file():
+                legacy.unlink()
+                logger.info("Removed stale dedupe sidecar %s from the kneeboard folder.", legacy.name)
         except OSError as exc:
-            logger.debug("Could not persist dedupe state to %s: %s", sidecar, exc)
-        legacy = self._legacy_sidecar_path()
-        if legacy is not None:
-            try:
-                legacy.unlink(missing_ok=True)
-            except OSError:
-                pass
+            logger.debug("Could not remove legacy sidecar %s: %s", legacy, exc)
 
 
 # ---------------------------------------------------------------------------

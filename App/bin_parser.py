@@ -11,8 +11,6 @@ Public entry points
 --------------------
 * :func:`extract_dtc_from_directory` - full pipeline (scan -> filter -> sniff ->
   extract). This is what the watcher calls.
-* :func:`extract_dtc_from_directory_with_source` - same, but also returns the
-  source ``~tr*.bin`` the JSON came from (for provenance/change-detection logs).
 * :func:`find_dtc_bin_files` - the scan/size-filter/sort step on its own.
 * :func:`file_has_dtc_markers` - the cheap 64 KB marker sniff.
 * :func:`extract_json_from_bin` - JSON recovery from a single file.
@@ -38,6 +36,11 @@ the documented ``N `` case, and leaves already-clean runs untouched. Likewise,
 the JSON is pretty-printed, so the object start is matched as ``{`` + optional
 whitespace + ``"data":`` rather than the literal ``{"data":``.
 
+One file holds MANY copies of the DTC JSON, appended oldest-first: DCS writes a
+fresh serialisation every time the cartridge changes (e.g. via the spawn-selector
+DTC manager). The *latest* config is therefore the last copy, so the extractor
+returns the newest complete copy, not the first (see :func:`_find_json_object`).
+
 Only the Python standard library is used.
 """
 
@@ -46,19 +49,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
-
-
-def _format_mtime(epoch: float) -> str:
-    """Format an epoch mtime as a short UTC timestamp, for diagnostic logs."""
-    try:
-        return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    except (OverflowError, OSError, ValueError):
-        return str(epoch)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +118,7 @@ def find_dtc_bin_files(
             logger.error("Temp directory does not exist or is not a directory: %s", dir_path)
             return []
 
-        candidates: list[tuple[float, int, Path]] = []
+        candidates: list[tuple[float, Path]] = []
         for path in dir_path.glob(BIN_GLOB):
             try:
                 stat = path.stat()
@@ -140,17 +134,11 @@ def find_dtc_bin_files(
                     path.name, size, min_size, max_size,
                 )
                 continue
-            candidates.append((stat.st_mtime, size, path))
+            candidates.append((stat.st_mtime, path))
 
         candidates.sort(key=lambda item: item[0], reverse=True)
-        ordered = [path for _, _, path in candidates]
+        ordered = [path for _, path in candidates]
         logger.info("Found %d candidate .bin file(s) in %s.", len(ordered), dir_path)
-        # Diagnostic: list every candidate (newest first) with size + mtime, so a
-        # stale or mis-selected DTC file is visible in the log.
-        for mtime, size, path in candidates:
-            logger.info(
-                "  candidate %s: %d bytes, modified %s", path.name, size, _format_mtime(mtime)
-            )
         return ordered
     except Exception as exc:  # never crash the watcher
         logger.exception("Unexpected error scanning %s: %s", directory, exc)
@@ -220,20 +208,13 @@ def _collect_clean_text(data: bytes) -> str:
     return b"".join(parts).decode("ascii", errors="ignore")
 
 
-def _find_json_object(text: str) -> Optional[str]:
-    """Return the first complete ``{"data": ...}`` object substring, or None.
+def _match_balanced_object(text: str, start: int) -> Optional[str]:
+    """Return the brace-balanced object substring beginning at ``start``, or None.
 
-    Locates the opening brace of the object whose first key is ``data``
-    (tolerant of pretty-print whitespace), then does string-aware brace-depth
-    matching to the closing brace, so braces inside string values (e.g. a
-    profile name) are not miscounted.
+    String-aware brace-depth matching, so braces inside string values (e.g. a
+    profile name) are not miscounted. Returns None if the braces never balance,
+    which is how a copy truncated mid-write is rejected.
     """
-    match = _JSON_START_RE.search(text)
-    if not match:
-        logger.error("No '{\"data\": ...}' object found in the extracted text.")
-        return None
-
-    start = match.start()
     depth = 0
     in_string = False
     escaped = False
@@ -254,8 +235,47 @@ def _find_json_object(text: str) -> Optional[str]:
             depth -= 1
             if depth == 0:
                 return text[start : index + 1]
+    return None
 
-    logger.error("Unterminated DTC JSON object (brace depth never returned to zero).")
+
+def _find_json_object(text: str) -> Optional[str]:
+    """Return the NEWEST complete ``{"data": ...}`` object substring, or None.
+
+    DCS appends a fresh serialisation of the DTC to the temp file each time the
+    cartridge changes (e.g. applying a new config in the spawn-selector DTC
+    manager), so one file accumulates many copies in chronological order, oldest
+    first. We want the *latest* config, so this scans every ``{"data":`` copy and
+    returns the last one that is both brace-balanced and valid JSON, falling back
+    towards earlier copies if the final one is mid-write/truncated.
+
+    (The previous behaviour returned the *first* copy, so a DTC changed during a
+    session was never picked up - confirmed against a real capture whose first
+    copies held the old config and whose later copies held the updated one.)
+    """
+    starts = [m.start() for m in _JSON_START_RE.finditer(text)]
+    if not starts:
+        logger.error("No '{\"data\": ...}' object found in the extracted text.")
+        return None
+
+    for from_end, start in enumerate(reversed(starts)):
+        candidate = _match_balanced_object(text, start)
+        if candidate is None:
+            continue  # truncated/unbalanced copy; try the previous one
+        try:
+            json.loads(candidate)
+        except json.JSONDecodeError:
+            continue  # balanced but not valid JSON; try the previous one
+        copy_number = len(starts) - from_end  # 1-based, counting from file start
+        logger.info(
+            "Using DTC copy %d of %d (newest valid) from the temp file.",
+            copy_number, len(starts),
+        )
+        return candidate
+
+    logger.error(
+        "Found %d '{\"data\":' copy/copies but none were complete, valid JSON.",
+        len(starts),
+    )
     return None
 
 
@@ -311,12 +331,12 @@ def extract_json_from_bin(path: Union[str, Path]) -> Optional[dict]:
 # Full pipeline
 # ---------------------------------------------------------------------------
 
-def extract_dtc_from_directory_with_source(
+def extract_dtc_from_directory(
     directory: Union[str, Path],
     min_size: int = MIN_FILE_SIZE,
     max_size: int = MAX_FILE_SIZE,
-) -> tuple[Optional[dict], Optional[Path]]:
-    """Scan a temp directory and return the parsed DTC dict and its source file.
+) -> Optional[dict]:
+    """Scan a temp directory and return the parsed DTC dict from the best file.
 
     Pipeline: glob ``~tr*.bin`` -> size filter -> sort newest-first -> 64 KB
     marker sniff -> JSON extraction. Marker-matching files are tried in order;
@@ -329,15 +349,14 @@ def extract_dtc_from_directory_with_source(
         max_size: Inclusive upper size bound in bytes.
 
     Returns:
-        ``(parsed DTC dict, source .bin path)``, or ``(None, None)`` if no file
-        yields valid DTC data. The source path lets callers record provenance
-        and spot a stale/mis-selected file. Never raises.
+        The parsed DTC dict, or None if no file yields valid DTC data. Never
+        raises.
     """
     try:
         candidates = find_dtc_bin_files(directory, min_size, max_size)
         if not candidates:
             logger.warning("No ~tr*.bin candidates in the size range found in %s.", directory)
-            return None, None
+            return None
 
         for path in candidates:
             if not file_has_dtc_markers(path):
@@ -345,31 +364,17 @@ def extract_dtc_from_directory_with_source(
             logger.info("Identified candidate DTC file: %s", path.name)
             parsed = extract_json_from_bin(path)
             if parsed is not None:
-                return parsed, path
+                return parsed
             logger.warning(
                 "Marker-matched file %s did not yield valid DTC JSON; trying next candidate.",
                 path.name,
             )
 
         logger.error("No file in %s yielded valid DTC JSON.", directory)
-        return None, None
+        return None
     except Exception as exc:  # never crash the watcher
         logger.exception("Unexpected error processing directory %s: %s", directory, exc)
-        return None, None
-
-
-def extract_dtc_from_directory(
-    directory: Union[str, Path],
-    min_size: int = MIN_FILE_SIZE,
-    max_size: int = MAX_FILE_SIZE,
-) -> Optional[dict]:
-    """Scan a temp directory and return the parsed DTC dict from the best file.
-
-    Thin wrapper over :func:`extract_dtc_from_directory_with_source` for callers
-    that do not need the source path. See it for the full pipeline. Never raises.
-    """
-    parsed, _source = extract_dtc_from_directory_with_source(directory, min_size, max_size)
-    return parsed
+        return None
 
 
 # ---------------------------------------------------------------------------
