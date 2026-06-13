@@ -1,4 +1,3 @@
-<img width="1536" height="2048" alt="000_dtc_config" src="https://github.com/user-attachments/assets/37d43960-d26b-4482-8707-bc5b44a5b905" />
 # DCS MiG-29A DTC Kneeboard Utility
 
 Auto-generates a kneeboard page summarising your MiG-29A's Data Transfer
@@ -7,8 +6,12 @@ screenshotting the mission planner: the moment you occupy a MiG-29A slot, the
 utility reads the DTC you loaded and renders it as a clean, readable kneeboard
 page in the in-game kneeboard.
 
-<!-- TODO: hero image - drop a rendered kneeboard example into docs/images/
-     and reference it here -->
+<p align="center">
+  <img src="docs/images/dtc-kneeboard-sample.jpg" width="380"
+       alt="Example generated kneeboard page for a MiG-29A DTC: tactical points, radio channels, ADF beacons and SPO-15 settings" />
+  <br>
+  <em>An auto-generated kneeboard page for a loaded DTC.</em>
+</p>
 
 ## What it shows
 
