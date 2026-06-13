@@ -12,7 +12,7 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Lua syntax check (Lua 5.1, as embedded in DCS)
         run: |
