@@ -148,6 +148,19 @@ def _make_sandbox(root: Path, *, with_beacons: bool = False, with_bin: bool = Fa
     )
 
 
+def _watcher(cfg: config.AppConfig, tmp: object, **kwargs) -> trigger_watcher.TriggerWatcher:
+    """Build a watcher whose dedupe sidecar lives in the sandbox under ``tmp``.
+
+    Without an explicit ``state_dir`` the sidecar would land in the real App
+    directory (next to config.json), which would both litter the repo and let
+    one test's fingerprint suppress another's render. Tests always go through
+    this so the state stays inside the temporary directory.
+    """
+    state = Path(tmp) / "app_state"
+    state.mkdir(parents=True, exist_ok=True)
+    return trigger_watcher.TriggerWatcher(cfg, state_dir=state, **kwargs)
+
+
 # Distinct sentinel for "generate this automatically" (so None can mean "omit").
 _AUTO = object()
 
@@ -205,7 +218,7 @@ def test_full_pipeline_via_watcher(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_beacons=True, with_bin=True)
         trigger = _write_trigger(cfg)
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
 
         output = watcher.poll_once()
 
@@ -227,7 +240,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     # --- absent trigger: poll is a harmless no-op ---------------------------
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp))
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
         checks.check("No trigger file -> poll_once returns None",
                      watcher.poll_once() is None)
 
@@ -235,7 +248,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         trigger = _write_trigger(cfg, age_minutes=10.0)
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
         output = watcher.poll_once()
         expected = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
         checks.check("Stale trigger -> poll_once returns None", output is None)
@@ -246,7 +259,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         trigger = _write_trigger(cfg, body="{ this is not valid json ")
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
         checks.check("Malformed trigger -> poll_once returns None",
                      watcher.poll_once() is None)
         checks.check("Malformed trigger -> file consumed", not trigger.exists())
@@ -256,7 +269,7 @@ def test_trigger_lifecycle(checks: Checks) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = _make_sandbox(Path(tmp), with_bin=True)
             _write_trigger(cfg, timestamp=None)
-            watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+            watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
             output = watcher.poll_once()
             checks.check("Trigger without timestamp -> still processed",
                          output is not None and output.is_file(), str(output))
@@ -348,7 +361,7 @@ def test_dedupe_unchanged(checks: Checks) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
         output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
         bin_path = Path(cfg.dcs_temp_path) / REAL_BIN.name
 
@@ -371,7 +384,7 @@ def test_dedupe_unchanged(checks: Checks) -> None:
             checks.check("First generate wrote a valid JPEG", ok, detail)
             sig_after_first = (output.stat().st_mtime_ns, output.stat().st_size)
 
-            # 2. Nothing changed -> cheap source early-out: no render, no rewrite.
+            # 2. Nothing changed -> content fingerprint matches: no render, no rewrite.
             second = watcher.generate_kneeboard()
             checks.check("Second generate returns None (skipped)", second is None)
             checks.check("Second generate did not render", render_calls["n"] == 1,
@@ -381,9 +394,9 @@ def test_dedupe_unchanged(checks: Checks) -> None:
                 (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
             )
 
-            # 3. Same content but a new source identity (bumped mtime): the source
-            #    early-out no longer fires, but the content fingerprint still
-            #    suppresses the render.
+            # 3. DCS rewrites the temp file with identical content (new mtime, as
+            #    seen live in MP): we re-extract, but the content fingerprint
+            #    still suppresses the render.
             st = bin_path.stat()
             bumped = st.st_mtime_ns + 5_000_000_000  # +5s, comfortably distinct
             os.utime(bin_path, ns=(bumped, bumped))
@@ -393,7 +406,7 @@ def test_dedupe_unchanged(checks: Checks) -> None:
             checks.check("Third generate did not render (fingerprint match)",
                          render_calls["n"] == 1, f"{render_calls['n']} render(s)")
 
-            # 4. force=True bypasses both dedupe layers and re-renders.
+            # 4. force=True bypasses the dedupe and re-renders.
             forced = watcher.generate_kneeboard(force=True)
             checks.check("force=True returns a path", forced is not None, str(forced))
             checks.check("force=True rendered again", render_calls["n"] == 2,
@@ -413,7 +426,7 @@ def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
         cfg = _make_sandbox(Path(tmp), with_bin=True)
         output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
 
-        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
         _write_trigger(cfg)
         first = watcher.poll_once()
         checks.check("poll_once first renders", first is not None, str(first))
@@ -427,17 +440,50 @@ def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
             (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
         )
 
+        # The sidecar lives in the app state dir, not the kneeboard folder.
+        sidecar = Path(tmp) / "app_state" / trigger_watcher.SIDECAR_NAME
+        checks.check("Dedupe sidecar written to app state dir", sidecar.is_file(),
+                     str(sidecar))
+        checks.check("No sidecar left in the kneeboard folder",
+                     not list(output.parent.glob("*.fingerprint.json")))
+
         # A brand-new watcher (simulating an app restart) loads the sidecar and
         # still recognises the unchanged DTC, so it does not regenerate.
-        sidecar = output.with_name(output.stem + trigger_watcher.SIDECAR_SUFFIX)
-        checks.check("Fingerprint sidecar was written", sidecar.is_file(), str(sidecar))
-        restarted = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        restarted = _watcher(cfg, tmp, post_trigger_delay=0.0)
         again = restarted.generate_kneeboard()
         checks.check("Restarted watcher skips unchanged DTC (persisted)", again is None)
         checks.check(
             "Restarted watcher did not rewrite the JPEG",
             (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
         )
+
+
+def test_sidecar_location_and_cleanup(checks: Checks) -> None:
+    """The dedupe sidecar lives in the app state dir; a legacy one is cleaned up."""
+    _banner("DEDUPE  -  sidecar location + legacy cleanup")
+    if not REAL_BIN.is_file():
+        checks.skip("Sidecar location", f"sample .bin not found at {REAL_BIN}")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _make_sandbox(Path(tmp), with_bin=True)
+        output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
+
+        # Plant a legacy sidecar beside the JPEG (where the first version wrote it).
+        output.parent.mkdir(parents=True, exist_ok=True)
+        legacy = output.with_name(output.stem + ".fingerprint.json")
+        legacy.write_text('{"fingerprint": "stale"}', encoding="utf-8")
+
+        watcher = _watcher(cfg, tmp, post_trigger_delay=0.0)
+        result = watcher.generate_kneeboard()
+        checks.check("Generated a kneeboard", result is not None, str(result))
+
+        new_sidecar = Path(tmp) / "app_state" / trigger_watcher.SIDECAR_NAME
+        checks.check("Sidecar written to the app state dir", new_sidecar.is_file(),
+                     str(new_sidecar))
+        checks.check("Legacy kneeboard-folder sidecar removed", not legacy.exists())
+        checks.check("No .fingerprint.json left beside the kneeboard",
+                     not list(output.parent.glob("*.fingerprint.json")))
 
 
 def test_watcher_thread(checks: Checks) -> None:
@@ -449,9 +495,7 @@ def test_watcher_thread(checks: Checks) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _make_sandbox(Path(tmp), with_beacons=True, with_bin=True)
-        watcher = trigger_watcher.TriggerWatcher(
-            cfg, poll_interval=0.05, post_trigger_delay=0.0
-        )
+        watcher = _watcher(cfg, tmp, poll_interval=0.05, post_trigger_delay=0.0)
         expected = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
 
         checks.check("Not running before start()", not watcher.is_running())
@@ -498,6 +542,7 @@ def main() -> int:
     test_direct_dtc_pipeline(checks)
     test_dedupe_unchanged(checks)
     test_dedupe_via_poll_and_restart(checks)
+    test_sidecar_location_and_cleanup(checks)
     test_watcher_thread(checks)
     test_output_path_spec(checks)
     return 0 if checks.summary() else 1

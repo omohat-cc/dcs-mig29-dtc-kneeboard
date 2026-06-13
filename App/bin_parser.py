@@ -11,9 +11,9 @@ Public entry points
 --------------------
 * :func:`extract_dtc_from_directory` - full pipeline (scan -> filter -> sniff ->
   extract). This is what the watcher calls.
+* :func:`extract_dtc_from_directory_with_source` - same, but also returns the
+  source ``~tr*.bin`` the JSON came from (for provenance/change-detection logs).
 * :func:`find_dtc_bin_files` - the scan/size-filter/sort step on its own.
-* :func:`find_dtc_bin_file` - the cheap "which file would we pick" probe (scan +
-  marker sniff, no extraction), for change-detection early-outs.
 * :func:`file_has_dtc_markers` - the cheap 64 KB marker sniff.
 * :func:`extract_json_from_bin` - JSON recovery from a single file.
 
@@ -46,10 +46,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
+
+
+def _format_mtime(epoch: float) -> str:
+    """Format an epoch mtime as a short UTC timestamp, for diagnostic logs."""
+    try:
+        return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    except (OverflowError, OSError, ValueError):
+        return str(epoch)
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +124,7 @@ def find_dtc_bin_files(
             logger.error("Temp directory does not exist or is not a directory: %s", dir_path)
             return []
 
-        candidates: list[tuple[float, Path]] = []
+        candidates: list[tuple[float, int, Path]] = []
         for path in dir_path.glob(BIN_GLOB):
             try:
                 stat = path.stat()
@@ -131,11 +140,17 @@ def find_dtc_bin_files(
                     path.name, size, min_size, max_size,
                 )
                 continue
-            candidates.append((stat.st_mtime, path))
+            candidates.append((stat.st_mtime, size, path))
 
         candidates.sort(key=lambda item: item[0], reverse=True)
-        ordered = [path for _, path in candidates]
+        ordered = [path for _, _, path in candidates]
         logger.info("Found %d candidate .bin file(s) in %s.", len(ordered), dir_path)
+        # Diagnostic: list every candidate (newest first) with size + mtime, so a
+        # stale or mis-selected DTC file is visible in the log.
+        for mtime, size, path in candidates:
+            logger.info(
+                "  candidate %s: %d bytes, modified %s", path.name, size, _format_mtime(mtime)
+            )
         return ordered
     except Exception as exc:  # never crash the watcher
         logger.exception("Unexpected error scanning %s: %s", directory, exc)
@@ -172,42 +187,6 @@ def file_has_dtc_markers(path: Union[str, Path], header_size: int = HEADER_READ_
         file_path.name, has_aircraft, has_data,
     )
     return False
-
-
-def find_dtc_bin_file(
-    directory: Union[str, Path],
-    min_size: int = MIN_FILE_SIZE,
-    max_size: int = MAX_FILE_SIZE,
-) -> Optional[Path]:
-    """Return the single best DTC ``~tr*.bin`` candidate, without extracting it.
-
-    Runs only the cheap part of the pipeline (glob -> size filter -> newest-first
-    sort -> 64 KB marker sniff) and returns the newest file carrying both DTC
-    markers, or ``None`` if there is none. This lets a caller cheaply identify
-    the file the extractor *would* pick - e.g. to compare its path/mtime/size
-    against the last run and skip re-extracting when nothing has changed -
-    without paying the cost of reading and parsing the whole file.
-
-    It repeats the cheap scan that :func:`extract_dtc_from_directory` does
-    internally, so it is a lightweight pre-check, not a replacement for it.
-    Never raises.
-
-    Args:
-        directory: The DCS temp directory to scan.
-        min_size: Inclusive lower size bound in bytes.
-        max_size: Inclusive upper size bound in bytes.
-
-    Returns:
-        The newest size-filtered, marker-matching file, or ``None``.
-    """
-    try:
-        for path in find_dtc_bin_files(directory, min_size, max_size):
-            if file_has_dtc_markers(path):
-                return path
-        return None
-    except Exception as exc:  # never crash the watcher
-        logger.exception("Unexpected error selecting DTC .bin file in %s: %s", directory, exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -332,12 +311,12 @@ def extract_json_from_bin(path: Union[str, Path]) -> Optional[dict]:
 # Full pipeline
 # ---------------------------------------------------------------------------
 
-def extract_dtc_from_directory(
+def extract_dtc_from_directory_with_source(
     directory: Union[str, Path],
     min_size: int = MIN_FILE_SIZE,
     max_size: int = MAX_FILE_SIZE,
-) -> Optional[dict]:
-    """Scan a temp directory and return the parsed DTC dict from the best file.
+) -> tuple[Optional[dict], Optional[Path]]:
+    """Scan a temp directory and return the parsed DTC dict and its source file.
 
     Pipeline: glob ``~tr*.bin`` -> size filter -> sort newest-first -> 64 KB
     marker sniff -> JSON extraction. Marker-matching files are tried in order;
@@ -350,14 +329,15 @@ def extract_dtc_from_directory(
         max_size: Inclusive upper size bound in bytes.
 
     Returns:
-        The parsed DTC dict, or None if no file yields valid DTC data. Never
-        raises.
+        ``(parsed DTC dict, source .bin path)``, or ``(None, None)`` if no file
+        yields valid DTC data. The source path lets callers record provenance
+        and spot a stale/mis-selected file. Never raises.
     """
     try:
         candidates = find_dtc_bin_files(directory, min_size, max_size)
         if not candidates:
             logger.warning("No ~tr*.bin candidates in the size range found in %s.", directory)
-            return None
+            return None, None
 
         for path in candidates:
             if not file_has_dtc_markers(path):
@@ -365,17 +345,31 @@ def extract_dtc_from_directory(
             logger.info("Identified candidate DTC file: %s", path.name)
             parsed = extract_json_from_bin(path)
             if parsed is not None:
-                return parsed
+                return parsed, path
             logger.warning(
                 "Marker-matched file %s did not yield valid DTC JSON; trying next candidate.",
                 path.name,
             )
 
         logger.error("No file in %s yielded valid DTC JSON.", directory)
-        return None
+        return None, None
     except Exception as exc:  # never crash the watcher
         logger.exception("Unexpected error processing directory %s: %s", directory, exc)
-        return None
+        return None, None
+
+
+def extract_dtc_from_directory(
+    directory: Union[str, Path],
+    min_size: int = MIN_FILE_SIZE,
+    max_size: int = MAX_FILE_SIZE,
+) -> Optional[dict]:
+    """Scan a temp directory and return the parsed DTC dict from the best file.
+
+    Thin wrapper over :func:`extract_dtc_from_directory_with_source` for callers
+    that do not need the source path. See it for the full pipeline. Never raises.
+    """
+    parsed, _source = extract_dtc_from_directory_with_source(directory, min_size, max_size)
+    return parsed
 
 
 # ---------------------------------------------------------------------------
