@@ -92,7 +92,7 @@ def test_bundled_template(checks: Checks) -> None:
     if not checks.check("Bundled hook_template.lua is present and readable", bool(text)):
         return
 
-    checks.check("Bundled version is 1.0", hm.bundled_hook_version() == "1.0")
+    checks.check("Bundled version is 1.1", hm.bundled_hook_version() == "1.1")
     checks.check("Line 1 is the version comment",
                  text.splitlines()[0].startswith("-- dtc_kneeboard_hook v"))
 

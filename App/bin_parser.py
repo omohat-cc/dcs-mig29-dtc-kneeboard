@@ -12,6 +12,8 @@ Public entry points
 * :func:`extract_dtc_from_directory` - full pipeline (scan -> filter -> sniff ->
   extract). This is what the watcher calls.
 * :func:`find_dtc_bin_files` - the scan/size-filter/sort step on its own.
+* :func:`find_dtc_bin_file` - the cheap "which file would we pick" probe (scan +
+  marker sniff, no extraction), for change-detection early-outs.
 * :func:`file_has_dtc_markers` - the cheap 64 KB marker sniff.
 * :func:`extract_json_from_bin` - JSON recovery from a single file.
 
@@ -170,6 +172,42 @@ def file_has_dtc_markers(path: Union[str, Path], header_size: int = HEADER_READ_
         file_path.name, has_aircraft, has_data,
     )
     return False
+
+
+def find_dtc_bin_file(
+    directory: Union[str, Path],
+    min_size: int = MIN_FILE_SIZE,
+    max_size: int = MAX_FILE_SIZE,
+) -> Optional[Path]:
+    """Return the single best DTC ``~tr*.bin`` candidate, without extracting it.
+
+    Runs only the cheap part of the pipeline (glob -> size filter -> newest-first
+    sort -> 64 KB marker sniff) and returns the newest file carrying both DTC
+    markers, or ``None`` if there is none. This lets a caller cheaply identify
+    the file the extractor *would* pick - e.g. to compare its path/mtime/size
+    against the last run and skip re-extracting when nothing has changed -
+    without paying the cost of reading and parsing the whole file.
+
+    It repeats the cheap scan that :func:`extract_dtc_from_directory` does
+    internally, so it is a lightweight pre-check, not a replacement for it.
+    Never raises.
+
+    Args:
+        directory: The DCS temp directory to scan.
+        min_size: Inclusive lower size bound in bytes.
+        max_size: Inclusive upper size bound in bytes.
+
+    Returns:
+        The newest size-filtered, marker-matching file, or ``None``.
+    """
+    try:
+        for path in find_dtc_bin_files(directory, min_size, max_size):
+            if file_has_dtc_markers(path):
+                return path
+        return None
+    except Exception as exc:  # never crash the watcher
+        logger.exception("Unexpected error selecting DTC .bin file in %s: %s", directory, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------

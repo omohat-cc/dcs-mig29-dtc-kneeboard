@@ -339,6 +339,107 @@ def test_direct_dtc_pipeline(checks: Checks) -> None:
         checks.check("Direct .dtc render is a valid 1536x2048 JPEG", ok, detail)
 
 
+def test_dedupe_unchanged(checks: Checks) -> None:
+    """An unchanged DTC is not re-rendered; force=True bypasses the dedupe."""
+    _banner("DEDUPE  -  unchanged DTC skips the render (force overrides)")
+    if not REAL_BIN.is_file():
+        checks.skip("DTC dedupe", f"sample .bin not found at {REAL_BIN}")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _make_sandbox(Path(tmp), with_bin=True)
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
+        bin_path = Path(cfg.dcs_temp_path) / REAL_BIN.name
+
+        # Count actual renders by wrapping the renderer the watcher calls.
+        real_render = trigger_watcher.render_kneeboard
+        render_calls = {"n": 0}
+
+        def counting_render(processed, out):
+            render_calls["n"] += 1
+            return real_render(processed, out)
+
+        trigger_watcher.render_kneeboard = counting_render
+        try:
+            # 1. First generation renders.
+            first = watcher.generate_kneeboard()
+            checks.check("First generate returns a path", first is not None, str(first))
+            checks.check("First generate rendered once", render_calls["n"] == 1,
+                         f"{render_calls['n']} render(s)")
+            ok, detail = _is_valid_kneeboard(output)
+            checks.check("First generate wrote a valid JPEG", ok, detail)
+            sig_after_first = (output.stat().st_mtime_ns, output.stat().st_size)
+
+            # 2. Nothing changed -> cheap source early-out: no render, no rewrite.
+            second = watcher.generate_kneeboard()
+            checks.check("Second generate returns None (skipped)", second is None)
+            checks.check("Second generate did not render", render_calls["n"] == 1,
+                         f"{render_calls['n']} render(s)")
+            checks.check(
+                "Second generate did not rewrite the JPEG",
+                (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
+            )
+
+            # 3. Same content but a new source identity (bumped mtime): the source
+            #    early-out no longer fires, but the content fingerprint still
+            #    suppresses the render.
+            st = bin_path.stat()
+            bumped = st.st_mtime_ns + 5_000_000_000  # +5s, comfortably distinct
+            os.utime(bin_path, ns=(bumped, bumped))
+            third = watcher.generate_kneeboard()
+            checks.check("Third generate (same content, new mtime) returns None",
+                         third is None)
+            checks.check("Third generate did not render (fingerprint match)",
+                         render_calls["n"] == 1, f"{render_calls['n']} render(s)")
+
+            # 4. force=True bypasses both dedupe layers and re-renders.
+            forced = watcher.generate_kneeboard(force=True)
+            checks.check("force=True returns a path", forced is not None, str(forced))
+            checks.check("force=True rendered again", render_calls["n"] == 2,
+                         f"{render_calls['n']} render(s)")
+        finally:
+            trigger_watcher.render_kneeboard = real_render
+
+
+def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
+    """The dedupe holds through poll_once and survives a watcher restart (sidecar)."""
+    _banner("DEDUPE  -  poll_once path + sidecar persistence across restart")
+    if not REAL_BIN.is_file():
+        checks.skip("DTC dedupe (poll/restart)", f"sample .bin not found at {REAL_BIN}")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _make_sandbox(Path(tmp), with_bin=True)
+        output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
+
+        watcher = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        _write_trigger(cfg)
+        first = watcher.poll_once()
+        checks.check("poll_once first renders", first is not None, str(first))
+        sig_after_first = (output.stat().st_mtime_ns, output.stat().st_size)
+
+        _write_trigger(cfg)
+        second = watcher.poll_once()
+        checks.check("poll_once second (unchanged) skips", second is None)
+        checks.check(
+            "poll_once second did not rewrite the JPEG",
+            (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
+        )
+
+        # A brand-new watcher (simulating an app restart) loads the sidecar and
+        # still recognises the unchanged DTC, so it does not regenerate.
+        sidecar = output.with_name(output.stem + trigger_watcher.SIDECAR_SUFFIX)
+        checks.check("Fingerprint sidecar was written", sidecar.is_file(), str(sidecar))
+        restarted = trigger_watcher.TriggerWatcher(cfg, post_trigger_delay=0.0)
+        again = restarted.generate_kneeboard()
+        checks.check("Restarted watcher skips unchanged DTC (persisted)", again is None)
+        checks.check(
+            "Restarted watcher did not rewrite the JPEG",
+            (output.stat().st_mtime_ns, output.stat().st_size) == sig_after_first,
+        )
+
+
 def test_watcher_thread(checks: Checks) -> None:
     """Background thread: start, detect a trigger written after start, stop."""
     _banner("BACKGROUND THREAD  -  start / detect / stop")
@@ -395,6 +496,8 @@ def main() -> int:
     test_adf_resolution_real_beacons(checks)
     test_adf_fallback_no_beacons(checks)
     test_direct_dtc_pipeline(checks)
+    test_dedupe_unchanged(checks)
+    test_dedupe_via_poll_and_restart(checks)
     test_watcher_thread(checks)
     test_output_path_spec(checks)
     return 0 if checks.summary() else 1

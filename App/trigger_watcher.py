@@ -29,6 +29,7 @@ Only the standard library plus the sibling app modules are imported (no
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -37,7 +38,7 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from beacon_parser import BeaconResolver
-from bin_parser import extract_dtc_from_directory
+from bin_parser import extract_dtc_from_directory, find_dtc_bin_file
 from config import AppConfig
 from dtc_processor import DTCProcessingError, ProcessedDTC, process_dtc
 from kneeboard_renderer import KneeboardRenderError, render_kneeboard
@@ -57,6 +58,12 @@ TRIGGER_SUBPATH = ("Logs", "dtc_kneeboard_trigger.json")
 # Note: "Kneeboard" (no 's'), "MiG-29 Fulcrum" (with space) per spec section 3.
 # The "000_" prefix sorts the page first in DCS's kneeboard page order.
 OUTPUT_SUBPATH = ("Kneeboard", "MiG-29 Fulcrum", "000_dtc_config.jpg")
+
+# Dedupe sidecar written next to the output JPEG. It records the fingerprint and
+# source-file identity of the last render so the dedupe survives an app restart.
+# A ".json" file is ignored by DCS's kneeboard loader, so it is safe to sit in
+# the kneeboard page folder.
+SIDECAR_SUFFIX = ".fingerprint.json"
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +159,13 @@ class TriggerWatcher:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._resolver = self._build_resolver(config)
+
+        # Dedupe state (see generate_kneeboard). Held in memory and mirrored to a
+        # sidecar next to the output JPEG so it survives a restart. The signature
+        # is (source path, st_mtime_ns, st_size) of the .bin last rendered from.
+        self._last_fingerprint: Optional[str] = None
+        self._last_source_signature: Optional[tuple[str, int, int]] = None
+        self._state_loaded = False
 
     # --- construction helpers ---------------------------------------------
     @staticmethod
@@ -331,16 +345,41 @@ class TriggerWatcher:
             self._log(f"Could not delete trigger file {trigger}: {exc}", logging.WARNING)
 
     # --- pipeline ----------------------------------------------------------
-    def generate_kneeboard(self, trigger_data: Optional[dict] = None) -> Optional[Path]:
+    def generate_kneeboard(
+        self, trigger_data: Optional[dict] = None, *, force: bool = False
+    ) -> Optional[Path]:
         """Run the full extract -> process -> resolve -> render pipeline once.
+
+        Two dedupe layers avoid needless re-rendering, which is wasteful and, on
+        lower-spec PCs, can briefly stutter DCS (the Pillow draw + JPEG encode
+        runs on this background thread). In multiplayer the hook can re-fire the
+        trigger repeatedly for the same DTC, so this guards the expensive work:
+
+        * Cheap source early-out: identify the ``~tr*.bin`` the extractor would
+          pick and compare its (path, mtime, size) to the last render. If it is
+          the same file, skip the whole extract+parse+render. Keyed on "the file
+          changed", not "same flight", so a mid-flight DTC edit (which rewrites
+          the temp file) is still picked up.
+        * Content fingerprint: hash the fully resolved DTC. If it matches the
+          last image rendered, skip just the render. ``to_dict()`` carries no
+          render timestamp, so an identical DTC hashes identically.
+
+        A genuine DTC edit changes the file and/or the hash, so it always
+        regenerates.
 
         Args:
             trigger_data: The parsed trigger (informational only; logged). The
                 terrain and aircraft come from the DTC itself, not the trigger.
+            force: If True, bypass both dedupe layers and always re-render. The
+                manual "regenerate" action (a later item) uses this.
 
         Returns:
-            The path to the written kneeboard JPEG, or ``None`` if any stage
-            failed. Never raises.
+            The kneeboard JPEG path **only if a fresh image was rendered this
+            call**; otherwise ``None`` - whether there was no DTC, a stage
+            failed, or the DTC was unchanged (a dedupe skip). A non-None return
+            therefore means "a new image was written", which is the signal the
+            on-generated notification (a later item) should fire on; a dedupe
+            skip deliberately returns ``None`` so it stays silent. Never raises.
         """
         temp = self.temp_path
         output = self.output_path
@@ -354,7 +393,20 @@ class TriggerWatcher:
         if trigger_data and trigger_data.get("aircraft"):
             self._log(f"Trigger aircraft: {trigger_data.get('aircraft')}")
 
+        self._ensure_state_loaded(output)
+
         try:
+            # --- cheap source-file early-out --------------------------------
+            source_signature = self._source_signature(find_dtc_bin_file(temp))
+            if (
+                not force
+                and source_signature is not None
+                and source_signature == self._last_source_signature
+                and output.is_file()
+            ):
+                self._log("DTC source file unchanged; kneeboard not regenerated.")
+                return None
+
             self._log(f"Scanning temp files in {temp} ...")
             parsed = extract_dtc_from_directory(temp)
             if parsed is None:
@@ -371,8 +423,27 @@ class TriggerWatcher:
             if resolved:
                 self._log(f"Resolved {resolved} ADF beacon name(s) from beacons.lua.")
 
+            # --- content fingerprint dedupe (after full resolution) ---------
+            fingerprint = self._compute_fingerprint(processed)
+            if (
+                not force
+                and fingerprint == self._last_fingerprint
+                and output.is_file()
+            ):
+                self._log("DTC unchanged; kneeboard not regenerated.")
+                # The on-disk image already matches this content; remember the
+                # (new) source identity so the cheaper early-out catches the
+                # next identical trigger without re-parsing.
+                self._last_source_signature = source_signature
+                self._persist_state(output)
+                return None
+
             written = render_kneeboard(processed, output)
             self._log(f"Kneeboard generated -> {written}")
+            # Record what we just rendered so future identical triggers dedupe.
+            self._last_fingerprint = fingerprint
+            self._last_source_signature = source_signature
+            self._persist_state(output)
             return Path(written)
 
         except DTCProcessingError as exc:
@@ -385,6 +456,68 @@ class TriggerWatcher:
             self._log(f"Failed to generate kneeboard: {exc}", logging.ERROR)
             logger.exception("generate_kneeboard error")
             return None
+
+    # --- dedupe helpers ----------------------------------------------------
+    @staticmethod
+    def _source_signature(candidate: Optional[Path]) -> Optional[tuple[str, int, int]]:
+        """Return (path, mtime_ns, size) for a candidate ``.bin``, or ``None``.
+
+        ``None`` (no candidate, or the file vanished between glob and stat) means
+        "cannot vouch for the source", which callers treat as "do not skip".
+        """
+        if candidate is None:
+            return None
+        try:
+            stat = candidate.stat()
+        except OSError:
+            return None
+        return (str(candidate), stat.st_mtime_ns, stat.st_size)
+
+    @staticmethod
+    def _compute_fingerprint(processed: ProcessedDTC) -> str:
+        """Return a stable SHA-256 over the resolved DTC's serialised content."""
+        payload = json.dumps(processed.to_dict(), sort_keys=True).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _sidecar_path(output: Path) -> Path:
+        """Path to the dedupe sidecar next to the output JPEG."""
+        return output.with_name(output.stem + SIDECAR_SUFFIX)
+
+    def _ensure_state_loaded(self, output: Path) -> None:
+        """Lazily load persisted dedupe state from the sidecar (once per run)."""
+        if self._state_loaded:
+            return
+        self._state_loaded = True
+        sidecar = self._sidecar_path(output)
+        try:
+            if not sidecar.is_file():
+                return
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return
+            fingerprint = data.get("fingerprint")
+            if isinstance(fingerprint, str):
+                self._last_fingerprint = fingerprint
+            source = data.get("source")
+            if isinstance(source, list) and len(source) == 3:
+                self._last_source_signature = (str(source[0]), int(source[1]), int(source[2]))
+            logger.debug("Loaded dedupe state from %s", sidecar)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.debug("Could not load dedupe state from %s: %s", sidecar, exc)
+
+    def _persist_state(self, output: Path) -> None:
+        """Best-effort mirror of the current dedupe state to the sidecar."""
+        sidecar = self._sidecar_path(output)
+        payload = {
+            "fingerprint": self._last_fingerprint,
+            "source": list(self._last_source_signature) if self._last_source_signature else None,
+        }
+        try:
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError as exc:
+            logger.debug("Could not persist dedupe state to %s: %s", sidecar, exc)
 
 
 # ---------------------------------------------------------------------------

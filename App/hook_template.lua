@@ -1,4 +1,4 @@
--- dtc_kneeboard_hook v1.0
+-- dtc_kneeboard_hook v1.1
 -- DCS MiG-29 DTC Kneeboard Utility - spawn-detection hook.
 --
 -- Detects when the local player occupies a MiG-29 and writes a small trigger
@@ -9,6 +9,13 @@
 -- The version comment on line 1 above is read by the external utility to decide
 -- whether to update this file. Keep it as the first line.
 --
+-- Changes:
+--   v1.1 - In multiplayer DCS calls onPlayerChangeSlot for EVERY player's slot
+--          change, not just ours. Each call re-armed the deferred poll, which
+--          re-checked our (still MiG-29) local unit and re-wrote the trigger -
+--          so on a populated server the trigger was rewritten every 30-60s.
+--          v1.1 ignores slot changes that are not the local player.
+--
 -- Safety constraints (technical spec, section 2):
 --   * Every DCS API call is wrapped in pcall.
 --   * Never calls DCS.getMissionLoaded() (crashes DCS).
@@ -17,7 +24,7 @@
 --   * Does NOT touch Export.lua - a completely separate Lua context.
 --   * Diagnostics go to Saved Games\DCS\Logs\dtc_kneeboard_hook.log via io.open.
 
-local VERSION = "1.0"
+local VERSION = "1.1"
 
 -- Deferred-poll tuning, in simulation frames (the sim loop ticks roughly once
 -- per frame, so ~60 frames is ~1 second at 60 fps).
@@ -73,6 +80,19 @@ local function safeGetMissionName()
         return result
     end
     return ""
+end
+
+local function safeGetMyPlayerId()
+    -- net.get_my_player_id() is the hooks-environment call for the LOCAL
+    -- player's id. It is absent/irrelevant in single-player, so any failure
+    -- returns nil and the caller falls back to its pre-v1.1 behaviour.
+    local ok, result = pcall(function()
+        return net.get_my_player_id()
+    end)
+    if ok and type(result) == "number" then
+        return result
+    end
+    return nil
 end
 
 local function safeGetTheatre()
@@ -191,8 +211,17 @@ end
 local handler = {}
 
 function handler.onPlayerChangeSlot(id)
-    -- Fires on every slot selection/change, including respawns. Restart the
-    -- deferred poll each time; the unit type is not reliable yet, so we only
+    -- Fires on every slot selection/change. In multiplayer DCS calls this for
+    -- EVERY player, so ignore changes that are not the local player - otherwise
+    -- each one re-arms the poll and re-writes the trigger for our unchanged
+    -- local unit (the v1.1 fix). If the local id cannot be determined (e.g.
+    -- single-player, where net is unavailable), fall through and arm as before.
+    local myId = safeGetMyPlayerId()
+    if myId ~= nil and id ~= nil and id ~= myId then
+        return
+    end
+
+    -- Restart the deferred poll; the unit type is not reliable yet, so we only
     -- arm the timer here and read the type later in onSimulationFrame.
     pollActive = true
     frameCount = 0
