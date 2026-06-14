@@ -14,12 +14,16 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
    customtkinter GUI that watches for the trigger, extracts the DTC from DCS's
    binary temp files, resolves it, and renders the kneeboard image.
 
-## Status (2026-06-01)
+## Status (2026-06-14)
 
-Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard.
-All modules, the GUI (`main.py`) and PyInstaller `--onefile` packaging are done.
-Developed on macOS; built and run on a Windows gaming PC. Remaining work is
-enhancements and broader live testing.
+Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
+live-tested in single-player and on a populated multiplayer server. All modules,
+the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
+macOS; built via GitHub Actions (Windows runner). Recent enhancements (all live-
+confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy from
+the temp file, in-memory render dedupe, and version-stamped CI builds. Remaining:
+a manual "regenerate" button/keybind (for mid-flight DTC edits made in the jet,
+and as a spawn-detection fallback), then broader testing.
 
 ## Conventions (non-negotiable)
 
@@ -46,6 +50,7 @@ DTC Kneeboard Utility/
 ├── LICENSE                       GPL-3.0
 ├── App/                          <- all source + build files
 │   ├── main.py                   GUI entry point (customtkinter window, tray, startup wiring)
+│   ├── app_version.py            single source of __version__ (CI stamps it per build)
 │   ├── app_icon.py               PIL-only programmatic app/tray icon
 │   ├── generate_icon.py          writes icon.ico / icon.png
 │   ├── config.py                 load/save config.json + DCS path auto-detection
@@ -125,6 +130,25 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
 8. **PyInstaller:** `fonts/` and `hook_template.lua` are DATA, not imports, so the
    spec bundles them explicitly; `kneeboard_renderer`, `hook_manager` and
    `app_icon` resolve `sys._MEIPASS` at runtime.
+9. **One temp file holds MANY DTC copies, appended oldest-first.** DCS writes a
+   fresh serialisation every time the cartridge changes (e.g. applying a config in
+   the spawn-selector DTC manager), so a single `~tr*.bin` accumulates dozens of
+   copies (a real capture had 20). `bin_parser._find_json_object` returns the
+   NEWEST complete copy (falling back if the last is truncated); reading the first
+   copy returns a stale config, so a mid-session DTC change is never picked up.
+   The log line `Using DTC copy N of M (newest valid)` shows which was used.
+10. **The MiG-29 spawn hook (v1.1) ignores non-local slot changes.** In MP, DCS
+    calls `onPlayerChangeSlot(id)` for EVERY player; each call re-armed the
+    deferred poll, which re-detected our (still MiG-29) local unit and re-wrote the
+    trigger, spamming it every 30-60s. The hook guards on `net.get_my_player_id()`
+    (pcall-wrapped; falls through to arm in single-player, where `net` is absent).
+11. **Render dedupe is in-memory only, deliberately not persisted.** The watcher
+    keeps a SHA-256 of the resolved DTC (`ProcessedDTC.to_dict()` carries no
+    timestamp, so identical configs hash identically) and skips the render when it
+    is unchanged. Not saved to disk: the first spawn after each launch always
+    renders (so it can never get "stuck"), and no working file is left in the
+    kneeboard folder (a stale sidecar from an earlier build is deleted on sight).
+    `generate_kneeboard(force=True)` bypasses it (for the future manual regenerate).
 
 ## Build, run, test
 
@@ -140,6 +164,12 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
 - **CI (`.github/workflows/build.yml`):** lint + tests then a PyInstaller build on
   `windows-latest`. Manual runs upload the exe as an artifact; pushing a `v*` tag
   attaches it to a draft GitHub release. This replaces building on the gaming PC.
+- **Build versioning:** every CI build is version-stamped so downloads are
+  distinguishable. The base lives in `app_version.py` (`__version__`); the "Stamp
+  build version" step derives the full string (manual: `0.1.0-dev.<run>.g<sha>`;
+  `v*` tag: `X.Y.Z`), rewrites `app_version.py` so it is baked into the exe (shown
+  in the title bar + startup log), and names the artifact and exe with it. Bump
+  the `0.1.0` base in `app_version.py` to start a new series.
 - **Lint / syntax (macOS dev):** `.venv/bin/python -m ruff check .` and
   `python -m py_compile <files>`.
 - **macOS dev limitation:** the `App/.venv` here (Homebrew Python 3.14) has **no
