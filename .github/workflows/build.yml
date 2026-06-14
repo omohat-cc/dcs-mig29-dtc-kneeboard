@@ -4,6 +4,12 @@
 #   * manually (Run workflow button) -> exe uploaded as a workflow artifact
 #   * pushing a tag like v1.0.0      -> exe attached to a draft GitHub release
 #
+# Every build is version-stamped so downloads can be told apart (see the "Stamp
+# build version" step): a manual test build gets 0.1.0-dev.<run_number>.g<sha>,
+# a tag build gets the tag (X.Y.Z). The version is baked into the exe (shown in
+# the window title bar and the startup log) and used to name both the artifact
+# and the exe file.
+#
 # The exe is a PyInstaller --onefile build, exactly as described in App/BUILD.md.
 
 name: Build
@@ -68,25 +74,52 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Stamp build version
+        shell: pwsh
+        run: |
+          # Read the base version (e.g. 0.1.0) from app_version.py, then derive a
+          # unique per-build string so downloaded test builds can be told apart.
+          $content = Get-Content app_version.py -Raw
+          if ($content -match '__version__\s*=\s*"([^"]+)"') {
+            $base = $matches[1] -replace '-dev$', ''
+          } else {
+            $base = "0.0.0"
+          }
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''          # release: X.Y.Z
+          } else {
+            $sha = $env:GITHUB_SHA.Substring(0, 7)
+            $version = "$base-dev.$($env:GITHUB_RUN_NUMBER).g$sha"      # test build
+          }
+          # Bake the version into the app (shown in the title bar and startup log).
+          (Get-Content app_version.py -Raw) -replace '__version__\s*=\s*"[^"]*"', "__version__ = `"$version`"" |
+            Set-Content app_version.py
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Build version: $version"
+
       - name: Build exe
         run: pyinstaller DCS_DTC_Kneeboard.spec --noconfirm --clean
 
-      - name: Smoke-check the exe exists
+      - name: Smoke-check and version-stamp the exe
+        shell: pwsh
         run: |
           if (-not (Test-Path "dist/DCS_DTC_Kneeboard.exe")) { exit 1 }
-          Get-Item "dist/DCS_DTC_Kneeboard.exe" | Format-List Name, Length
+          # Version-stamped name so several builds can coexist in one folder.
+          Copy-Item "dist/DCS_DTC_Kneeboard.exe" "dist/DCS_DTC_Kneeboard-$env:VERSION.exe"
+          Get-Item "dist/DCS_DTC_Kneeboard-$env:VERSION.exe" | Format-List Name, Length
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: DCS_DTC_Kneeboard-win64
-          path: App/dist/DCS_DTC_Kneeboard.exe
+          name: DCS_DTC_Kneeboard-${{ env.VERSION }}
+          path: App/dist/DCS_DTC_Kneeboard-${{ env.VERSION }}.exe
           if-no-files-found: error
 
       - name: Attach to draft release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "$env:GITHUB_REF_NAME" "dist/DCS_DTC_Kneeboard.exe"
+          gh release create "$env:GITHUB_REF_NAME" "dist/DCS_DTC_Kneeboard-$env:VERSION.exe"
           --draft --generate-notes --title "$env:GITHUB_REF_NAME"

@@ -53,6 +53,7 @@ from config import (
     validate_saved_games_path,
     validate_temp_path,
 )
+from app_version import __version__
 from hook_manager import install_or_update_hook
 from trigger_watcher import TriggerWatcher
 
@@ -296,7 +297,7 @@ class DTCKneeboardApp(ctk.CTk):
         self._tray_icon: Optional["pystray.Icon"] = None
         self._tray_thread: Optional[threading.Thread] = None
 
-        self.title(WINDOW_TITLE)
+        self.title(f"{WINDOW_TITLE}  v{__version__}")
         self.geometry("840x660")
         self.minsize(720, 540)
         self.grid_columnconfigure(0, weight=1)
@@ -450,7 +451,7 @@ class DTCKneeboardApp(ctk.CTk):
     # --- startup sequence --------------------------------------------------
     def _run_startup(self) -> None:
         """Load config, resolve paths, install the hook and start the watcher."""
-        logger.info("Starting %s", WINDOW_TITLE)
+        logger.info("Starting %s v%s", WINDOW_TITLE, __version__)
         self.app_config, report = config_module.load_and_autodetect()
         self._refresh_entries_from_config()
 
