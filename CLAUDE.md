@@ -14,14 +14,15 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
    customtkinter GUI that watches for the trigger, extracts the DTC from DCS's
    binary temp files, resolves it, and renders the kneeboard image.
 
-## Status (2026-06-14)
+## Status (2026-06-16)
 
 Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
 live-tested in single-player and on a populated multiplayer server. All modules,
 the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
 macOS; built via GitHub Actions (Windows runner). Recent enhancements (all live-
 confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy from
-the temp file, in-memory render dedupe, and version-stamped CI builds. Remaining:
+the temp file, in-memory render dedupe, version-stamped CI builds, and the ADF
+frequency cross-check shown beneath resolved beacon names. Remaining:
 a manual "regenerate" button/keybind (for mid-flight DTC edits made in the jet,
 and as a spawn-detection fallback), then broader testing.
 
@@ -120,7 +121,10 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
    write-up: `docs/beacon-parser-findings.md`.
 5. **ADF beacon names are resolved in `trigger_watcher.resolve_adf_beacon_names`**
    (mutates the ProcessedDTC), NOT in `dtc_processor`, which leaves `name=None`.
-   The renderer uses `.name` if set, else the raw `"342 kHz AM"` fallback.
+   When `.name` is set the renderer shows it with the raw `"342 kHz AM"` frequency
+   drawn beneath in a smaller font (a cross-check, since a resolved name can differ
+   from the common airfield name); when unset it shows the raw frequency alone.
+   `_adf_freq_label` formats that frequency string for both paths.
 6. **bin_parser record prefix is a 2-byte big-endian length, not a literal "N ".**
    Strip it only when it equals `len(run) - 2` (self-validating). See the module
    docstring.

@@ -173,8 +173,11 @@ Built with customtkinter. Single window with:
 - For each of channels 1-4, read Inner and Outer:
   - Match `freq` against beacons.lua database for the active map
   - Map determined from `data.terrain` (e.g., "Syria" → `<dcs_install>\Mods\terrains\Syria\beacons.lua`)
-  - If match found: display beacon/airport name
-  - If no match: display raw frequency + modulation (e.g., "342 kHz AM")
+  - If match found: display the beacon/airport name, with the raw frequency +
+    modulation (e.g., "342 kHz AM") drawn beneath it in a smaller font as a
+    cross-check (a resolved name can differ from the common airfield name, so the
+    frequency lets the pilot verify it against the in-game map)
+  - If no match: display raw frequency + modulation (e.g., "342 kHz AM") as the value
 - Beacon matching: parse beacons.lua to build a freq → name lookup table
 
 **Radio (20 channels):**
@@ -301,6 +304,7 @@ All three are Google Fonts. Download TTF files and bundle with the exe. All nume
 | Resolved name | Barlow | 600 | 26 px | #15171A |
 | Secondary value (freq, rwy) | JetBrains Mono | 500 | 22-24 px | #15171A |
 | Modulation tag (AM/FM) | JetBrains Mono | 500 | 18 px | #2C2F35 |
+| ADF freq cross-check (under resolved name) | JetBrains Mono | 500 | 18 px (≈70% of name) | #2C2F35 |
 | SPO-15 Cyrillic glyph | Barlow Condensed | 800 | 36 px | #15171A |
 | SPO-15 Latin (parens) | JetBrains Mono | 500 | 16 px | #2C2F35 |
 

@@ -17,8 +17,8 @@ page in the in-game kneeboard.
 
 A single 1536x2048 kneeboard page with the contents of your loaded DTC,
 including navigation/tactical points, radio-navigation channels, ADF
-frequencies (resolved to beacon names for the current map) and SPO-15 launch
-warning settings.
+beacons (resolved to station names for the current map, each shown with its
+frequency for cross-checking) and SPO-15 launch warning settings.
 
 ## How it works
 
