@@ -402,6 +402,52 @@ def test_dedupe_unchanged(checks: Checks) -> None:
             trigger_watcher.render_kneeboard = real_render
 
 
+def test_on_generated_callback(checks: Checks) -> None:
+    """on_generated fires once per actual render, never on a dedupe skip."""
+    _banner("ON-GENERATED CALLBACK  -  fires on render, silent on dedupe skip")
+    if not REAL_BIN.is_file():
+        checks.skip("on_generated callback", f"sample .bin not found at {REAL_BIN}")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _make_sandbox(Path(tmp), with_bin=True)
+        output = Path(cfg.dcs_saved_games_path).joinpath(*trigger_watcher.OUTPUT_SUBPATH)
+        fired: list[Path] = []
+        watcher = trigger_watcher.TriggerWatcher(
+            cfg, post_trigger_delay=0.0, on_generated=fired.append
+        )
+
+        # 1. Actual render -> callback fires once with the output path.
+        first = watcher.generate_kneeboard()
+        checks.check("First generate returns a path", first is not None, str(first))
+        checks.check("Callback fired once on render", len(fired) == 1, f"{len(fired)} call(s)")
+        checks.check("Callback received the output path",
+                     bool(fired) and fired[0] == output, str(fired[-1] if fired else None))
+
+        # 2. Unchanged DTC -> dedupe skip -> callback must NOT fire.
+        second = watcher.generate_kneeboard()
+        checks.check("Second generate skipped (None)", second is None)
+        checks.check("Callback did not fire on dedupe skip", len(fired) == 1,
+                     f"{len(fired)} call(s)")
+
+        # 3. force=True -> renders again -> callback fires again.
+        forced = watcher.generate_kneeboard(force=True)
+        checks.check("force=True returns a path", forced is not None, str(forced))
+        checks.check("Callback fired again on forced render", len(fired) == 2,
+                     f"{len(fired)} call(s)")
+
+        # 4. A raising callback must not break the pipeline (still returns a path).
+        def boom(_p: Path) -> None:
+            raise RuntimeError("callback failure")
+
+        watcher_raise = trigger_watcher.TriggerWatcher(
+            cfg, post_trigger_delay=0.0, on_generated=boom
+        )
+        result = watcher_raise.generate_kneeboard(force=True)
+        checks.check("Raising callback does not break generate", result is not None,
+                     str(result))
+
+
 def test_dedupe_via_poll_and_restart(checks: Checks) -> None:
     """In-memory dedupe holds within a session; a fresh watcher re-renders; no sidecar."""
     _banner("DEDUPE  -  poll_once path; in-memory only (restart re-renders)")
@@ -518,6 +564,7 @@ def main() -> int:
     test_adf_fallback_no_beacons(checks)
     test_direct_dtc_pipeline(checks)
     test_dedupe_unchanged(checks)
+    test_on_generated_callback(checks)
     test_dedupe_via_poll_and_restart(checks)
     test_legacy_sidecar_cleanup(checks)
     test_watcher_thread(checks)

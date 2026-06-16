@@ -11,6 +11,7 @@ Output:
 
 Bundled into the exe (extracted to sys._MEIPASS at runtime):
     * fonts/*.ttf        - kneeboard_renderer + app_icon load these by name.
+    * sounds/*.wav       - the confirmation sound played on each render.
     * hook_template.lua  - hook_manager copies it into Saved Games on launch.
     * icon.ico           - window title-bar icon (also embedded as the exe icon).
     * customtkinter assets - theme JSON + widget assets the toolkit needs.
@@ -33,6 +34,7 @@ except NameError:
 # --- data files (source_path, dest_dir_in_bundle) --------------------------
 datas = [
     (os.path.join(BASE_DIR, "fonts"), "fonts"),
+    (os.path.join(BASE_DIR, "sounds"), "sounds"),
     (os.path.join(BASE_DIR, "hook_template.lua"), "."),
 ]
 

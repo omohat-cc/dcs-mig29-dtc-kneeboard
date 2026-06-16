@@ -53,6 +53,7 @@ from config import (
     validate_saved_games_path,
     validate_temp_path,
 )
+import sound
 from app_version import __version__
 from hook_manager import install_or_update_hook
 from trigger_watcher import TriggerWatcher
@@ -286,6 +287,8 @@ class DTCKneeboardApp(ctk.CTk):
         self.app_config: AppConfig = AppConfig()
         self.watcher: Optional[TriggerWatcher] = None
         self.entries: Dict[str, ctk.CTkEntry] = {}
+        # Resolved once: the bundled confirmation sound played on each render.
+        self._sound_path = sound.kneeboard_sound_path(_resource_dir())
 
         self._log_queue: "queue.Queue[tuple[int, str]]" = queue.Queue()
         # Tray callbacks fire on pystray's thread; they enqueue a callable here
@@ -491,8 +494,22 @@ class DTCKneeboardApp(ctk.CTk):
         """(Re)create and start the trigger watcher from the current config."""
         if self.watcher is not None and self.watcher.is_running():
             self.watcher.stop()
-        self.watcher = TriggerWatcher(self.app_config)
+        self.watcher = TriggerWatcher(
+            self.app_config, on_generated=self._on_kneeboard_generated
+        )
         self.watcher.start()  # logs "Watching..." or an error if paths are unset
+
+    def _on_kneeboard_generated(self, path: Path) -> None:
+        """Play the confirmation sound after a successful kneeboard render.
+
+        Passed to the watcher as its ``on_generated`` callback, so it runs on
+        the watcher's daemon thread and only when a fresh image was written
+        (never on a dedupe skip). Playback is non-blocking (winsound SND_ASYNC)
+        and never touches Tk, so it is safe to call here directly without
+        marshalling onto the GUI loop; a sound failure is swallowed by
+        :func:`sound.play_sound`.
+        """
+        sound.play_sound(self._sound_path)
 
     # --- settings actions --------------------------------------------------
     def _browse_setting(self, key: str) -> None:

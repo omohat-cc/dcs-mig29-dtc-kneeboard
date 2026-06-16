@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 LogCallback = Callable[[str], None]
+# Invoked with the output JPEG path after a successful render (see
+# generate_kneeboard); used by the GUI to play the "kneeboard generated" sound.
+OnGeneratedCallback = Callable[[Path], None]
 
 # Timing defaults (technical spec, section 3).
 DEFAULT_POLL_INTERVAL = 2.0        # seconds between trigger-file polls
@@ -138,6 +141,7 @@ class TriggerWatcher:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         post_trigger_delay: float = DEFAULT_POST_TRIGGER_DELAY,
         max_trigger_age: float = DEFAULT_MAX_TRIGGER_AGE,
+        on_generated: Optional[OnGeneratedCallback] = None,
     ) -> None:
         """Args:
             config: Loaded application configuration (supplies the DCS paths).
@@ -148,12 +152,17 @@ class TriggerWatcher:
                 scanning temp files (lets DCS finish writing them).
             max_trigger_age: Triggers with a timestamp older than this (seconds)
                 are discarded as stale.
+            on_generated: Optional callable invoked with the output JPEG path
+                after a successful render (never on a dedupe skip or failure).
+                Used by the GUI to play a confirmation sound. It must not raise;
+                any exception is caught and logged so the pipeline is unaffected.
         """
         self._config = config
         self._log_callback = log_callback
         self._poll_interval = poll_interval
         self._post_trigger_delay = post_trigger_delay
         self._max_trigger_age = max_trigger_age
+        self._on_generated = on_generated
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -413,7 +422,9 @@ class TriggerWatcher:
             written = render_kneeboard(processed, output)  # logs "Kneeboard generated -> ..."
             # Remember what we just rendered so identical respawns dedupe.
             self._last_fingerprint = fingerprint
-            return Path(written)
+            result = Path(written)
+            self._notify_generated(result)
+            return result
 
         except DTCProcessingError as exc:
             self._log(f"DTC processing failed: {exc}", logging.ERROR)
@@ -425,6 +436,20 @@ class TriggerWatcher:
             self._log(f"Failed to generate kneeboard: {exc}", logging.ERROR)
             logger.exception("generate_kneeboard error")
             return None
+
+    def _notify_generated(self, output: Path) -> None:
+        """Invoke the on-generated callback, if set, after an actual render.
+
+        Called only when a fresh image was written (never on a dedupe skip).
+        The callback must not raise; any exception is caught and logged so a
+        misbehaving callback (e.g. a sound failure) cannot disrupt the pipeline.
+        """
+        if self._on_generated is None:
+            return
+        try:
+            self._on_generated(output)
+        except Exception:  # noqa: BLE001 - a callback must never break the pipeline
+            logger.exception("on_generated callback raised")
 
     # --- dedupe helpers ----------------------------------------------------
     @staticmethod
