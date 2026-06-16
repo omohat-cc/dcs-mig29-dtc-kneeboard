@@ -33,7 +33,7 @@ OUTPUT_DIR = APP_DIR / "test_output"
 SAMPLE_FILES = [
     "Aerodrome_Point_Test_DTC.dtc",
     "RSBN_Test_DTC.dtc",
-    "SPO15 + Points + ADF - Contention SARH Era1.dtc",  # the attached DTC
+    "SPO15 + Points + ADF - Contention SARH E1- Syria.dtc",  # the attached DTC
 ]
 
 # Fixed timestamp so output is reproducible (matches the design reference).
@@ -70,7 +70,7 @@ def _reference_replica() -> dict:
     data) and injects navigation entries plus resolved ADF beacon names so all
     seven sections are populated, matching the locked layout render.
     """
-    attached = DTC_DIR / "SPO15 + Points + ADF - Contention SARH Era1.dtc"
+    attached = DTC_DIR / "SPO15 + Points + ADF - Contention SARH E1- Syria.dtc"
     data = process_dtc(load_dtc_file(attached)).to_dict()
     data = copy.deepcopy(data)
 

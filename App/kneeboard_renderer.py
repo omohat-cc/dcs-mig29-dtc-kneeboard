@@ -322,6 +322,11 @@ def _draw_cell_name(
     font: ImageFont.FreeTypeFont,
     fill: tuple[int, int, int],
     align: str = "left",
+    *,
+    sub_text: Optional[str] = None,
+    sub_font: Optional[ImageFont.FreeTypeFont] = None,
+    sub_fill: Optional[tuple[int, int, int]] = None,
+    max_h: Optional[float] = None,
 ) -> None:
     """Draw a (possibly two-line) name vertically centred on ``cy``.
 
@@ -329,14 +334,30 @@ def _draw_cell_name(
     right alignment. Long names wrap to two lines (e.g. "Krasnodar-Center").
     The whole block of lines is centred on ``cy`` so a wrapped name never bleeds
     into the next row.
+
+    An optional ``sub_text`` (drawn in ``sub_font``/``sub_fill``, e.g. a small
+    frequency cross-check) is stacked as one extra line below the name. Each
+    line's pitch is its own font size, matching the single-name rhythm. When
+    ``max_h`` is given, the pitches are compressed uniformly if the stack would
+    exceed it, so a two-line name plus a sub-line still fits inside the row.
     """
     h_anchor = "r" if align == "right" else "l"
     lines = _wrap_to_width(font, text, max_w)
-    line_h = font.size  # line-to-line pitch
-    n = len(lines)
-    for i, line in enumerate(lines):
-        line_cy = cy + (i - (n - 1) / 2) * line_h
-        _draw_text(draw, (x, line_cy), line, font, fill, anchor=h_anchor + "m")
+
+    # (line text, face, colour, pitch) entries, top to bottom.
+    stack = [(line, font, fill, font.size) for line in lines]
+    if sub_text and sub_font is not None:
+        stack.append((sub_text, sub_font, sub_fill or fill, sub_font.size))
+
+    total = sum(pitch for *_, pitch in stack)
+    scale = max_h / total if (max_h is not None and total > max_h) else 1.0
+
+    cursor = cy - (total * scale) / 2
+    for line_text, line_font, line_fill, pitch in stack:
+        step = pitch * scale
+        _draw_text(draw, (x, cursor + step / 2), line_text, line_font, line_fill,
+                   anchor=h_anchor + "m")
+        cursor += step
 
 
 # ===========================================================================
@@ -591,6 +612,16 @@ def _draw_nav_section(
             )
 
 
+def _adf_freq_label(beacon: dict) -> str:
+    """Format an ADF beacon's frequency for display, e.g. "450 kHz AM".
+
+    Used both as the raw fallback (when the station name is unresolved) and as
+    the small cross-check sub-line drawn beneath a resolved name.
+    """
+    modulation = beacon.get("modulation") or ""
+    return f"{beacon.get('freq')} kHz {modulation}".strip()
+
+
 def _draw_adf_section(
     draw: ImageDraw.ImageDraw, fonts: FontBook, box: tuple[int, int, int, int],
     channels: list[dict],
@@ -617,22 +648,32 @@ def _draw_adf_section(
     _draw_row_separators(draw, x0, x1, rows_top, row_h, n)
 
     name_font = fonts.get("barlow_semi", FS_NAME)
+    freq_font = fonts.get("jb_med", FS_MOD)
     for i, ch in enumerate(channels):
         cy = rows_top + (i + 0.5) * row_h
         _draw_slot_tag(draw, fonts, f"ADF {ch.get('channel', i + 1)}", x0 + ROW_PAD_X, cy)
         for col_idx, key in ((1, "inner"), (2, "outer")):
             col = ADF_COLS[col_idx]
+            text_x = x0 + col.x0 + ROW_PAD_X
             beacon = ch.get(key)
-            if beacon and beacon.get("freq"):
-                text = beacon.get("name") or f"{beacon['freq']} kHz {beacon.get('modulation', '')}".strip()
+            if not (beacon and beacon.get("freq")):
+                _draw_text(draw, (text_x, cy), NO_VALUE, name_font, INK_3, anchor="lm")
+                continue
+            name = beacon.get("name")
+            if name:
+                # Resolved station: draw the name with a small frequency
+                # sub-line so the pilot can cross-check it on the in-game map.
+                # max_h keeps a two-line name plus the sub-line inside the row.
                 _draw_cell_name(
-                    draw, text, x0 + col.x0 + ROW_PAD_X, cy, col.inner_max_w(),
-                    name_font, INK,
+                    draw, name, text_x, cy, col.inner_max_w(), name_font, INK,
+                    sub_text=_adf_freq_label(beacon), sub_font=freq_font,
+                    sub_fill=INK_2, max_h=row_h - 10,
                 )
             else:
-                _draw_text(
-                    draw, (x0 + col.x0 + ROW_PAD_X, cy), NO_VALUE, name_font, INK_3,
-                    anchor="lm",
+                # Unresolved: keep the raw "450 kHz AM" frequency as the value.
+                _draw_cell_name(
+                    draw, _adf_freq_label(beacon), text_x, cy, col.inner_max_w(),
+                    name_font, INK,
                 )
 
 
