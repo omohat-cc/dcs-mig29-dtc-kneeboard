@@ -59,5 +59,5 @@ def play_sound(path: Path) -> bool:
         )
         return True
     except Exception as exc:  # noqa: BLE001 - a sound failure must never disrupt the app
-        logger.debug("Could not play confirmation sound %s: %s", path, exc, exc_info=True)
+        logger.warning("Could not play confirmation sound %s: %s", path, exc, exc_info=True)
         return False

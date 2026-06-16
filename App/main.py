@@ -509,6 +509,7 @@ class DTCKneeboardApp(ctk.CTk):
         marshalling onto the GUI loop; a sound failure is swallowed by
         :func:`sound.play_sound`.
         """
+        logger.info("Kneeboard generated; playing confirmation sound (%s).", self._sound_path)
         sound.play_sound(self._sound_path)
 
     # --- settings actions --------------------------------------------------
