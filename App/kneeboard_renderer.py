@@ -127,6 +127,7 @@ FS_MOD = 21            # modulation tag (AM/FM)
 FS_DESC = 27           # SPO-15 threat description
 FS_SPO_GLYPH = 41      # SPO-15 Cyrillic glyph (Oswald)
 FS_SPO_LATIN = 19      # SPO-15 Latin equivalent in parens
+FS_SPO_SUB = 15        # SPO-15 threat subtitle (mono, dimmed; sized to fit 1 line)
 FS_CHIP = 21           # status chip text
 FS_NOCONFIG = 39       # NO CONFIG empty-state label
 FS_HINT = 17           # "... NOT PROGRAMMED" hint
@@ -268,22 +269,27 @@ def _dotted_vline(
 
 def _wrap_to_width(
     font: ImageFont.FreeTypeFont, text: str, max_w: float, max_lines: int = 2,
+    *, break_hyphens: bool = True,
 ) -> list[str]:
-    """Wrap ``text`` to fit ``max_w``, breaking on spaces and hyphens.
+    """Wrap ``text`` to fit ``max_w``, breaking on spaces (and hyphens).
 
     Returns up to ``max_lines`` lines; the final line is ellipsised if the text
     still overflows. Long resolved names (e.g. "Krasnodar-Center") wrap to two
-    lines in narrow columns, matching the reference render.
+    lines in narrow columns, matching the reference render. Set
+    ``break_hyphens=False`` to break on spaces only, so hyphenated tokens like
+    "F-14" stay intact (used for the threat-description subtitles).
     """
     if font.getlength(text) <= max_w:
         return [text]
 
-    # Build break candidates: keep hyphens on the preceding fragment.
+    # Build break candidates. With break_hyphens, keep a hyphen on the preceding
+    # fragment so a break can follow it; otherwise only spaces are break points.
+    break_chars = " -" if break_hyphens else " "
     tokens: list[str] = []
     buf = ""
     for ch in text:
         buf += ch
-        if ch in " -":
+        if ch in break_chars:
             tokens.append(buf)
             buf = ""
     if buf:
@@ -327,6 +333,7 @@ def _draw_cell_name(
     sub_font: Optional[ImageFont.FreeTypeFont] = None,
     sub_fill: Optional[tuple[int, int, int]] = None,
     max_h: Optional[float] = None,
+    sub_gap: float = 0.0,
 ) -> None:
     """Draw a (possibly two-line) name vertically centred on ``cy``.
 
@@ -336,24 +343,35 @@ def _draw_cell_name(
     into the next row.
 
     An optional ``sub_text`` (drawn in ``sub_font``/``sub_fill``, e.g. a small
-    frequency cross-check) is stacked as one extra line below the name. Each
-    line's pitch is its own font size, matching the single-name rhythm. When
-    ``max_h`` is given, the pitches are compressed uniformly if the stack would
-    exceed it, so a two-line name plus a sub-line still fits inside the row.
+    frequency cross-check or a threat subtitle) is stacked below the name. It
+    wraps on spaces only (so hyphenated tokens like "F-14" stay intact) and may
+    occupy more than one line. Each line's pitch is its own font size, matching
+    the single-name rhythm. ``sub_gap`` adds vertical space above the sub-line(s)
+    so they sit lower and breathe (the name keeps its position). When ``max_h``
+    is given, the pitches are compressed uniformly if the stack would exceed it,
+    so the block still fits the row.
     """
     h_anchor = "r" if align == "right" else "l"
-    lines = _wrap_to_width(font, text, max_w)
 
-    # (line text, face, colour, pitch) entries, top to bottom.
-    stack = [(line, font, fill, font.size) for line in lines]
+    # (line text, face, colour, pitch) entries, top to bottom: name line(s) then
+    # any sub-line(s). n_main marks where the optional sub-gap is inserted.
+    stack = [(line, font, fill, font.size) for line in _wrap_to_width(font, text, max_w)]
+    n_main = len(stack)
     if sub_text and sub_font is not None:
-        stack.append((sub_text, sub_font, sub_fill or fill, sub_font.size))
+        for sub_line in _wrap_to_width(sub_font, sub_text, max_w, break_hyphens=False):
+            stack.append((sub_line, sub_font, sub_fill or fill, sub_font.size))
 
-    total = sum(pitch for *_, pitch in stack)
-    scale = max_h / total if (max_h is not None and total > max_h) else 1.0
+    gap = sub_gap if len(stack) > n_main else 0.0
+    # Centre the name+sub lines on cy as if there were no gap, then push the
+    # sub-line(s) down by the gap: the name keeps its place and only the
+    # sub-line moves down to breathe.
+    base_total = sum(pitch for *_, pitch in stack)
+    scale = max_h / (base_total + gap) if (max_h is not None and base_total + gap > max_h) else 1.0
 
-    cursor = cy - (total * scale) / 2
-    for line_text, line_font, line_fill, pitch in stack:
+    cursor = cy - (base_total * scale) / 2
+    for i, (line_text, line_font, line_fill, pitch) in enumerate(stack):
+        if i == n_main and gap:
+            cursor += gap * scale
         step = pitch * scale
         _draw_text(draw, (x, cursor + step / 2), line_text, line_font, line_fill,
                    anchor=h_anchor + "m")
@@ -418,9 +436,21 @@ CMDS_COLS = [
 ]
 SPO15_COLS = [
     Column("threat", "THREAT", 0, 102),
-    Column("desc", "DESCRIPTION", 102, 332),
-    Column("status", "STATUS", 332, COL_W, align="right"),
+    # DESCRIPTION borrows 16px from STATUS (whose chip needs only ~90px of its
+    # column) so the longest threat subtitle fits on one line.
+    Column("desc", "DESCRIPTION", 102, 348),
+    Column("status", "STATUS", 348, COL_W, align="right"),
 ]
+
+# Real-world emitters each SPO-15 threat letter maps to, drawn as a small
+# subtitle under the description (keyed by Latin letter; only these have one).
+# Wraps on spaces, so aircraft designations like "F-14" stay intact.
+SPO15_THREAT_SUBTITLES = {
+    "P": "(F-4 Launch/F-14 Lock)",
+    "X": "(F-14 Scan)",
+    "F": "(F-15/16/18 Lock)",
+    "C": "(F-4E Scan)",
+}
 ADF_W = ADF_X1 - ADF_X0  # 952
 ADF_COLS = [
     Column("channel", "CHANNEL", 0, 165),
@@ -787,6 +817,7 @@ def _draw_spo15_section(
     glyph_font = fonts.get("oswald_bold", FS_SPO_GLYPH)
     latin_font = fonts.get("jb_med", FS_SPO_LATIN)
     desc_font = fonts.get("barlow_semi", FS_DESC)
+    sub_font = fonts.get("jb_med", FS_SPO_SUB)
     desc_col, status_col = SPO15_COLS[1], SPO15_COLS[2]
     for i, entry in enumerate(entries):
         cy = rows_top + (i + 0.5) * row_h
@@ -797,9 +828,13 @@ def _draw_spo15_section(
         _draw_text(
             draw, (gx + glyph_w + 8, cy + 1), f"({latin})", latin_font, INK_2, anchor="lm",
         )
-        _draw_text(
-            draw, (x0 + desc_col.x0 + ROW_PAD_X, cy), f"Threat type {latin}", desc_font,
-            INK, anchor="lm",
+        # Description, with an optional small subtitle naming the real emitters
+        # (same mono face/colour as the ADF frequency line) for P / F / C.
+        _draw_cell_name(
+            draw, f"Threat type {latin}", x0 + desc_col.x0 + ROW_PAD_X, cy,
+            desc_col.inner_max_w(), desc_font, INK,
+            sub_text=SPO15_THREAT_SUBTITLES.get(latin), sub_font=sub_font,
+            sub_fill=INK_2, max_h=row_h - 10, sub_gap=8,
         )
         _draw_chip(draw, fonts, status_col.text_x(x0) + 0, cy, entry.get("state", "Off"))
 
