@@ -37,6 +37,12 @@ DCS picks up the refreshed page on your next spawn. Nothing is injected into
 the mission and no game files are modified; the hook uses DCS's official
 `Scripts/Hooks` mechanism, the same one used by SRS, Tacview and OpenKneeboard.
 
+The app sits in the system tray while you fly: closing the window (X) minimises
+it there, the **Exit** button (or the tray's Quit) closes it for good, and only
+one copy runs at a time. If you edit the DTC in the cockpit after spawning, click
+**Regenerate Kneeboard** to rebuild the page on demand (the automatic trigger
+only fires on a fresh MiG-29 spawn, not on a mid-flight edit).
+
 ## Installation
 
 1. Download `DCS_DTC_Kneeboard.exe` from the
