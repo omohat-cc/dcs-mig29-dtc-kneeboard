@@ -341,7 +341,7 @@ This avoids re-serialising the entire file and accidentally breaking formatting 
 
 DTC files are named descriptively based on their contents:
 - `SPO15 + ADF - Contention SARH Era1.dtc` (SPO-15 RWR + ADF presets for Contention server)
-- `SPO15 + Points + ADF - Contention SARH Era1.dtc` (same, with Points added)
+- `SPO15 + Points + ADF - Contention SARH E1- Syria.dtc` (same, with Points added; Syria theatre)
 
 Pattern: `<RWR config> + <added features> - <server/scenario>.dtc`
 

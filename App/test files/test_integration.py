@@ -68,7 +68,7 @@ BEACONS_DIR = Path(os.environ.get("DCS_BEACONS_DIR", str(TEST_DIR / "fixtures"))
 
 SYRIA_BEACONS = BEACONS_DIR / "Syria_beacons.lua"
 REAL_BIN = PROBE_DIR / "Temp File 2" / "~tr00005738.bin"  # Syria DTC, 79 points
-ADF_DTC = DTC_FILES_DIR / "SPO15 + Points + ADF - Contention SARH Era1.dtc"
+ADF_DTC = DTC_FILES_DIR / "SPO15 + Points + ADF - Contention SARH E1- Syria.dtc"
 SIMPLE_DTC = DTC_FILES_DIR / "RSBN_Test_DTC.dtc"
 
 CANVAS_SIZE = (1536, 2048)
