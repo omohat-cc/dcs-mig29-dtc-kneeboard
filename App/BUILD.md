@@ -1,9 +1,9 @@
 # Building the DCS MiG-29 DTC Kneeboard Utility
 
 This packages the Python source into a single Windows executable,
-`DCS_DTC_Kneeboard.exe`, with the fonts, the Lua hook template, the window icon
-and customtkinter's assets all embedded. No Python install is needed on the
-target machine.
+`DCS_DTC_Kneeboard.exe`, with the fonts, the confirmation sound, the Lua hook
+template, the window icon and customtkinter's assets all embedded. No Python
+install is needed on the target machine.
 
 > Build on **Windows** to produce the Windows exe. PyInstaller is not a
 > cross-compiler: a build on macOS/Linux produces a binary for *that* OS, not
@@ -68,6 +68,7 @@ App\build\                          <- intermediates (safe to delete)
 | Item | Source | Why |
 |---|---|---|
 | `fonts/*.ttf` | `App/fonts/` | `kneeboard_renderer` and `app_icon` load these by name |
+| `sounds/*.wav` | `App/sounds/` | the confirmation sound `sound.play_sound` plays on each render |
 | `hook_template.lua` | `App/hook_template.lua` | `hook_manager` copies it into Saved Games on launch |
 | `icon.ico` | `App/icon.ico` | window title-bar icon (also embedded as the exe icon) |
 | customtkinter assets | the installed package | theme JSON + widget assets the toolkit needs at runtime |
@@ -103,6 +104,7 @@ pyinstaller --noconfirm --clean --onefile --windowed ^
   --name DCS_DTC_Kneeboard ^
   --icon icon.ico ^
   --add-data "fonts;fonts" ^
+  --add-data "sounds;sounds" ^
   --add-data "hook_template.lua;." ^
   --add-data "icon.ico;." ^
   --collect-data customtkinter ^
