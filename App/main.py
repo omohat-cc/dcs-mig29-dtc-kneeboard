@@ -93,6 +93,7 @@ _VALIDATORS: Dict[str, Callable[[Optional[str]], bool]] = {
 # Status-chip colours (reused from the kneeboard palette).
 COLOUR_OK = "#1F8A3F"
 COLOUR_BAD = "#C1273B"
+COLOUR_BAD_HOVER = "#9E1F30"  # darker red for the Exit button's hover state
 COLOUR_WARN = "#D08700"
 
 
@@ -326,7 +327,7 @@ class DTCKneeboardApp(ctk.CTk):
 
     # --- UI construction ---------------------------------------------------
     def _build_settings_section(self) -> None:
-        """Build the top settings card: three path rows + Save Settings."""
+        """Build the top settings card: Exit button, three path rows, Save Settings."""
         frame = ctk.CTkFrame(self)
         frame.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
         frame.grid_columnconfigure(1, weight=1)
@@ -334,7 +335,19 @@ class DTCKneeboardApp(ctk.CTk):
         ctk.CTkLabel(
             frame, text="Settings", anchor="w",
             font=ctk.CTkFont(size=16, weight="bold"),
-        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(10, 4))
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4))
+
+        # Exit (top-right of the card, above the first Browse button): a real
+        # quit, unlike the close (X) button which only minimises to the tray.
+        # Red sets it apart from the blue Save/Browse buttons and signals that
+        # it ends the app. With the single-instance guard, a forgotten tray copy
+        # is the usual reason the status log looks "stuck", so quitting cleanly
+        # via Exit (rather than leaving copies in the tray) avoids that.
+        ctk.CTkButton(
+            frame, text="Exit", width=90,
+            fg_color=COLOUR_BAD, hover_color=COLOUR_BAD_HOVER,
+            command=self._quit_app,
+        ).grid(row=0, column=2, sticky="e", padx=(8, 12), pady=(10, 4))
 
         for i, (key, label, _validator) in enumerate(PATH_FIELDS, start=1):
             ctk.CTkLabel(frame, text=label, width=120, anchor="w").grid(
@@ -738,7 +751,10 @@ class DTCKneeboardApp(ctk.CTk):
         """Close (X): minimise to tray if available, otherwise quit."""
         if self._tray_alive():
             self.withdraw()
-            logger.info("Minimised to system tray. Right-click the tray icon to quit.")
+            logger.info(
+                "Minimised to the system tray. Use the Exit button (or the tray's "
+                "Quit) to close it fully."
+            )
         else:
             self._quit_app()
 
@@ -771,11 +787,86 @@ class DTCKneeboardApp(ctk.CTk):
 
 
 # ---------------------------------------------------------------------------
+# Single-instance guard
+# ---------------------------------------------------------------------------
+# The named mutex handle of the first instance, kept for the whole process
+# lifetime so the name persists and a second launch can detect it. Module-level
+# so it is never garbage-collected while the app runs.
+_single_instance_handle: object = None
+SINGLE_INSTANCE_MUTEX = "DCS_MiG29_DTC_Kneeboard_Utility_SingleInstance"
+
+
+def _acquire_single_instance() -> bool:
+    """Return True if this is the only running instance, else False.
+
+    Uses a named Windows mutex: the first instance creates it and keeps the
+    handle open, so a second launch finds it already exists. The OS releases the
+    mutex when the owning process ends, so there is no stale-lock problem.
+    Windows-only; on other platforms it always returns True (the GUI runs only
+    on Windows, so the dev machine never needs the guard). Never raises: on any
+    error it returns True, so a detection failure can never stop the app.
+    """
+    global _single_instance_handle
+    if platform.system() != "Windows":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        error_already_exists = 183
+        kernel32 = ctypes.windll.kernel32
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+        create_mutex.restype = wintypes.HANDLE
+
+        handle = create_mutex(None, False, SINGLE_INSTANCE_MUTEX)
+        if not handle:
+            return True  # could not create the mutex; do not block startup
+        if kernel32.GetLastError() == error_already_exists:
+            return False
+        _single_instance_handle = handle  # keep alive for this process
+        return True
+    except Exception:  # noqa: BLE001 - a guard failure must never stop the app
+        logger.warning("Single-instance check failed; starting anyway.", exc_info=True)
+        return True
+
+
+def _notify_already_running() -> None:
+    """Tell the user the app is already running (the caller then exits).
+
+    Shows a native Windows message box (the app is built ``--windowed``, so
+    there is no console) and logs the event. Best-effort and never raises.
+    """
+    logger.warning("Another instance is already running; exiting this one.")
+    if platform.system() != "Windows":
+        return
+    message = (
+        "DCS MiG-29 DTC Kneeboard Utility is already running.\n\n"
+        "Look for its icon in the system tray, near the clock. The close (X) "
+        "button only minimises the app there; use the Exit button in its window "
+        "to quit it."
+    )
+    try:
+        import ctypes
+
+        mb_iconinformation = 0x40
+        mb_setforeground = 0x10000
+        ctypes.windll.user32.MessageBoxW(
+            0, message, "Already running", mb_iconinformation | mb_setforeground
+        )
+    except Exception:  # noqa: BLE001 - the notice is best-effort
+        logger.debug("Could not show the 'already running' message box.", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
-    """Configure logging, build the window and run the application."""
+    """Enforce single-instance, configure logging, build the window and run."""
     configure_logging()
+    if not _acquire_single_instance():
+        _notify_already_running()
+        return 0
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")
     try:
