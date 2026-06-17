@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(mess
 # checks skip cleanly when the folder is absent.
 DTC_DIR = Path(__file__).resolve().parents[3] / "DTC Files"
 
-CONTENTION_FILE = "SPO15 + Points + ADF - Contention SARH Era1.dtc"
+CONTENTION_FILE = "SPO15 + Points + ADF - Contention SARH E1- Syria.dtc"
 AERODROME_FILE = "Aerodrome_Point_Test_DTC.dtc"
 RSBN_FILE = "RSBN_Test_DTC.dtc"
 
@@ -39,6 +39,7 @@ class Checks:
     def __init__(self) -> None:
         self.passed = 0
         self.failed = 0
+        self.skipped = 0
 
     def check(self, label: str, condition: bool, detail: str = "") -> None:
         """Record and print a single verification result."""
@@ -51,11 +52,19 @@ class Checks:
         suffix = f"  ({detail})" if detail else ""
         print(f"    [{status}] {label}{suffix}")
 
+    def skip(self, label: str, reason: str) -> None:
+        """Record and print a skipped check (its fixture file is absent)."""
+        self.skipped += 1
+        print(f"    [SKIP] {label}  ({reason})")
+
     def summary(self) -> bool:
         """Print a final tally and return True if everything passed."""
         total = self.passed + self.failed
         print("\n" + "=" * 70)
-        print(f"VERIFICATION: {self.passed}/{total} checks passed, {self.failed} failed.")
+        print(
+            f"VERIFICATION: {self.passed}/{total} checks passed, "
+            f"{self.failed} failed, {self.skipped} skipped."
+        )
         print("=" * 70)
         return self.failed == 0
 
@@ -114,7 +123,11 @@ def _banner(title: str, filename: str) -> None:
 def run_contention(checks: Checks) -> None:
     """Process the Contention DTC and verify radio/ADF/CMDS/SPO-15 + empties."""
     _banner("CONTENTION", CONTENTION_FILE)
-    dtc = process_dtc(load_dtc_file(DTC_DIR / CONTENTION_FILE))
+    contention_path = DTC_DIR / CONTENTION_FILE
+    if not contention_path.is_file():
+        checks.skip("Contention checks", f"not found: {contention_path}")
+        return
+    dtc = process_dtc(load_dtc_file(contention_path))
     print_processed(dtc)
 
     print("\n  Verifying Contention expectations:")
@@ -160,7 +173,11 @@ def run_contention(checks: Checks) -> None:
 def run_aerodrome(checks: Checks) -> None:
     """Process the Aerodrome Test DTC and verify waypoint + airdrome resolution."""
     _banner("AERODROME TEST", AERODROME_FILE)
-    dtc = process_dtc(load_dtc_file(DTC_DIR / AERODROME_FILE))
+    aerodrome_path = DTC_DIR / AERODROME_FILE
+    if not aerodrome_path.is_file():
+        checks.skip("Aerodrome checks", f"not found: {aerodrome_path}")
+        return
+    dtc = process_dtc(load_dtc_file(aerodrome_path))
     print_processed(dtc)
 
     print("\n  Verifying Aerodrome expectations:")
@@ -195,7 +212,11 @@ def run_aerodrome(checks: Checks) -> None:
 def run_rsbn(checks: Checks) -> None:
     """Process the RSBN Test DTC and verify the single RSBN preset."""
     _banner("RSBN TEST", RSBN_FILE)
-    dtc = process_dtc(load_dtc_file(DTC_DIR / RSBN_FILE))
+    rsbn_path = DTC_DIR / RSBN_FILE
+    if not rsbn_path.is_file():
+        checks.skip("RSBN checks", f"not found: {rsbn_path}")
+        return
+    dtc = process_dtc(load_dtc_file(rsbn_path))
     print_processed(dtc)
 
     print("\n  Verifying RSBN expectations:")
