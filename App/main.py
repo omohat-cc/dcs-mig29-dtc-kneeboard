@@ -287,6 +287,11 @@ class DTCKneeboardApp(ctk.CTk):
         self.app_config: AppConfig = AppConfig()
         self.watcher: Optional[TriggerWatcher] = None
         self.entries: Dict[str, ctk.CTkEntry] = {}
+        # The on-demand rebuild button and an in-flight guard. Both are touched
+        # only on the Tk thread (the click handler and the queued completion),
+        # so a second click cannot start an overlapping rebuild.
+        self.regenerate_button: Optional[ctk.CTkButton] = None
+        self._regenerating = False
         # Resolved once: the bundled confirmation sound played on each render.
         self._sound_path = sound.kneeboard_sound_path(_resource_dir())
 
@@ -304,9 +309,10 @@ class DTCKneeboardApp(ctk.CTk):
         self.geometry("840x660")
         self.minsize(720, 540)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
         self._build_settings_section()
+        self._build_controls_section()
         self._build_status_section()
         self._set_window_icon()
 
@@ -347,10 +353,35 @@ class DTCKneeboardApp(ctk.CTk):
         ).grid(row=len(PATH_FIELDS) + 1, column=0, columnspan=3,
                sticky="e", padx=12, pady=(4, 12))
 
+    def _build_controls_section(self) -> None:
+        """Build the controls row: the on-demand 'Regenerate Kneeboard' button.
+
+        Regenerate rebuilds the kneeboard from the most recent DTC in the temp
+        directory, bypassing the change-detection dedupe (``force=True``), so a
+        pilot who edits the DTC in the cockpit after spawning can refresh the
+        page on demand. The scan + render runs on a short worker thread (see
+        :meth:`_on_regenerate_clicked`) so the Tk loop never freezes.
+        """
+        frame = ctk.CTkFrame(self)
+        frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+        frame.grid_columnconfigure(1, weight=1)
+
+        self.regenerate_button = ctk.CTkButton(
+            frame, text="Regenerate Kneeboard", width=180,
+            command=self._on_regenerate_clicked,
+        )
+        self.regenerate_button.grid(row=0, column=0, sticky="w", padx=12, pady=12)
+
+        ctk.CTkLabel(
+            frame,
+            text="Rebuild the page from the latest in-jet DTC (e.g. after editing it in the cockpit).",
+            anchor="w", justify="left", text_color=("gray40", "gray70"),
+        ).grid(row=0, column=1, sticky="w", padx=(4, 12), pady=12)
+
     def _build_status_section(self) -> None:
         """Build the bottom status card: a read-only, scrolling, timestamped log."""
         frame = ctk.CTkFrame(self)
-        frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(8, 16))
+        frame.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 16))
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(1, weight=1)
 
@@ -511,6 +542,90 @@ class DTCKneeboardApp(ctk.CTk):
         """
         logger.info("Kneeboard generated; playing confirmation sound (%s).", self._sound_path)
         sound.play_sound(self._sound_path)
+
+    # --- regenerate action -------------------------------------------------
+    def _on_regenerate_clicked(self) -> None:
+        """Handle the Regenerate button: run a forced rebuild off the Tk thread.
+
+        Disables the button, then runs :meth:`TriggerWatcher.generate_kneeboard`
+        with ``force=True`` (bypassing the dedupe, since the user explicitly
+        asked for a fresh page) on a short daemon worker thread so the temp-dir
+        scan and render never freeze the GUI. The outcome is marshalled back
+        onto the Tk loop via the command queue (:meth:`_on_regenerate_done`).
+        """
+        if self._regenerating:
+            return  # a rebuild is already in flight; the button is disabled
+        watcher = self.watcher
+        if watcher is None:
+            logger.warning("Cannot regenerate yet: the watcher is still starting up.")
+            return
+
+        self._regenerating = True
+        self._set_regenerate_enabled(False)
+        logger.info("Manual regenerate requested; rebuilding the kneeboard...")
+
+        worker = threading.Thread(
+            target=self._regenerate_worker, args=(watcher,),
+            name="dtc-regenerate", daemon=True,
+        )
+        worker.start()
+
+    def _regenerate_worker(self, watcher: TriggerWatcher) -> None:
+        """Run the forced rebuild on a worker thread; marshal the result back.
+
+        Runs off the Tk loop. ``generate_kneeboard`` already catches and logs
+        its own failures and returns ``None``, but it is wrapped defensively so
+        that even an unexpected error still re-enables the button rather than
+        stranding it. The outcome is handed to :meth:`_on_regenerate_done` via
+        the command queue, which the 100 ms GUI pump drains on the main thread.
+        On success the confirmation sound is played by the watcher's existing
+        on-generated callback (:meth:`_on_kneeboard_generated`), not here.
+        """
+        result: Optional[Path] = None
+        try:
+            result = watcher.generate_kneeboard(force=True)
+        except Exception:  # noqa: BLE001 - a worker crash must not strand the button
+            logger.exception("Manual regenerate failed unexpectedly.")
+            result = None
+        self._command_queue.put(lambda: self._on_regenerate_done(result))
+
+    def _on_regenerate_done(self, result: Optional[Path]) -> None:
+        """Re-enable the button and report the outcome (runs on the Tk loop).
+
+        On success the path is already logged by the renderer and the sound is
+        played by the on-generated callback, so here we re-enable the button and
+        confirm the manual action. On failure (``None``) we surface a friendly
+        summary; ``generate_kneeboard`` has already logged the specific reason
+        (temp path unset, no DTC ``.bin`` found, or a processing/render error)
+        on the line just above.
+        """
+        self._regenerating = False
+        self._set_regenerate_enabled(True)
+        if result is None:
+            logger.warning(
+                "Regenerate produced no kneeboard. Spawn into a MiG-29 in DCS "
+                "first, then regenerate (see the message above for the reason)."
+            )
+        else:
+            logger.info("Manual regenerate complete -> %s", result)
+
+    def _set_regenerate_enabled(self, enabled: bool) -> None:
+        """Enable or disable the Regenerate button (Tk-thread only, never fatal).
+
+        While a rebuild is in flight the button is disabled and relabelled, so a
+        second click cannot start an overlapping rebuild. Button state is
+        cosmetic, so any Tk error here is logged at debug level, not raised.
+        """
+        button = self.regenerate_button
+        if button is None:
+            return
+        try:
+            button.configure(
+                state="normal" if enabled else "disabled",
+                text="Regenerate Kneeboard" if enabled else "Regenerating...",
+            )
+        except Exception:  # noqa: BLE001 - button state is cosmetic, never fatal
+            logger.debug("Could not update the regenerate button state", exc_info=True)
 
     # --- settings actions --------------------------------------------------
     def _browse_setting(self, key: str) -> None:
