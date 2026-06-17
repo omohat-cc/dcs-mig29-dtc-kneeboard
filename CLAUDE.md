@@ -14,15 +14,17 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
    customtkinter GUI that watches for the trigger, extracts the DTC from DCS's
    binary temp files, resolves it, and renders the kneeboard image.
 
-## Status (2026-06-16)
+## Status (2026-06-17)
 
 Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
 live-tested in single-player and on a populated multiplayer server. All modules,
 the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
 macOS; built via GitHub Actions (Windows runner). Recent enhancements (all live-
 confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy from
-the temp file, in-memory render dedupe, version-stamped CI builds, and the ADF
-frequency cross-check shown beneath resolved beacon names. Remaining:
+the temp file, in-memory render dedupe, version-stamped CI builds, the ADF
+frequency cross-check shown beneath resolved beacon names, an audible
+confirmation sound on kneeboard generation, and real-world emitter subtitles on
+the SPO-15 threats. Remaining:
 a manual "regenerate" button/keybind (for mid-flight DTC edits made in the jet,
 and as a spawn-detection fallback), then broader testing.
 
@@ -153,6 +155,16 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     renders (so it can never get "stuck"), and no working file is left in the
     kneeboard folder (a stale sidecar from an earlier build is deleted on sight).
     `generate_kneeboard(force=True)` bypasses it (for the future manual regenerate).
+12. **The generation sound is Windows-only and fires only on an actual render.**
+    `main.py` passes `TriggerWatcher` an `on_generated` callback; the watcher
+    invokes it (in `_notify_generated`) only after a real render, never on a
+    dedupe skip, so an identical respawn stays silent. The callback runs on the
+    watcher's daemon thread and calls `sound.play_sound`, which uses stdlib
+    `winsound` with `SND_ASYNC` (non-blocking, so it never touches Tk and needs no
+    marshalling) and is a logged no-op off Windows. The asset is the bundled
+    `sounds/kneeboard_generated.wav` (winsound needs a PCM WAV); winsound plays to
+    the Windows *default* output device, so in VR the headset must be that device.
+    Any playback failure is caught and logged, never raised.
 
 ## Build, run, test
 

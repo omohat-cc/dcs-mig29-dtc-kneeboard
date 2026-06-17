@@ -211,6 +211,9 @@ Display labels:
 - `LW_indices` is a 6-element array from the CMDS object
 - Each value maps: 1 = Off, 2 = On, 3 = Lock
 - The 6 positions correspond to threat types (in order): П (P), З (3), Х (X), Н (H), Ф (F), С (C)
+- Under each threat description the renderer draws a small subtitle naming the
+  real-world emitters that raise it (where known): P = "(F-4 Launch/F-14 Lock)",
+  X = "(F-14 Scan)", F = "(F-15/16/18 Lock)", C = "(F-4E Scan)"; 3 and H have none
 
 ### beacons.lua parsing
 
@@ -229,6 +232,9 @@ Display labels:
 - **Behaviour:** Overwrites any existing `000_dtc_config.jpg` on each generation
 - **Format:** JPEG, 1536 × 2048 pixels
 - DCS refreshes user kneeboard pages on respawn, so the new image appears on the next spawn
+- **Audible confirmation:** on each *actual* render (not a dedupe skip) the app
+  plays a short bundled sound via the GUI's `on_generated` callback (stdlib
+  `winsound`, Windows-only; see `sound.py`), so the pilot gets confirmation in VR
 
 ### Empty section handling
 
@@ -305,6 +311,7 @@ All three are Google Fonts. Download TTF files and bundle with the exe. All nume
 | Secondary value (freq, rwy) | JetBrains Mono | 500 | 22-24 px | #15171A |
 | Modulation tag (AM/FM) | JetBrains Mono | 500 | 18 px | #2C2F35 |
 | ADF freq cross-check (under resolved name) | JetBrains Mono | 500 | 18 px (≈70% of name) | #2C2F35 |
+| SPO-15 threat subtitle (emitter, under description) | JetBrains Mono | 500 | 13 px | #2C2F35 |
 | SPO-15 Cyrillic glyph | Barlow Condensed | 800 | 36 px | #15171A |
 | SPO-15 Latin (parens) | JetBrains Mono | 500 | 16 px | #2C2F35 |
 

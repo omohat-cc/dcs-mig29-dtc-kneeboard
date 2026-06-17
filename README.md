@@ -30,7 +30,8 @@ The utility has two small parts:
 2. **A companion Windows app** (system-tray, customtkinter GUI) watches for the
    trigger, extracts the DTC data from DCS's temp files, resolves beacon names
    from the map's `beacons.lua`, renders the kneeboard JPG and saves it to
-   `Saved Games\Kneeboard\MiG-29 Fulcrum\000_dtc_config.jpg`.
+   `Saved Games\Kneeboard\MiG-29 Fulcrum\000_dtc_config.jpg`. It plays a short
+   confirmation sound on each new render, so you get audible feedback in VR.
 
 DCS picks up the refreshed page on your next spawn. Nothing is injected into
 the mission and no game files are modified; the hook uses DCS's official
