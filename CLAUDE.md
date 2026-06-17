@@ -19,14 +19,15 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
 Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
 live-tested in single-player and on a populated multiplayer server. All modules,
 the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
-macOS; built via GitHub Actions (Windows runner). Recent enhancements (all live-
-confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy from
-the temp file, in-memory render dedupe, version-stamped CI builds, the ADF
-frequency cross-check shown beneath resolved beacon names, an audible
-confirmation sound on kneeboard generation, and real-world emitter subtitles on
-the SPO-15 threats. Remaining:
-a manual "regenerate" button/keybind (for mid-flight DTC edits made in the jet,
-and as a spawn-detection fallback), then broader testing.
+macOS; built via GitHub Actions (Windows runner). **Released as v1.1.0.** Recent
+enhancements (all live-confirmed): the multiplayer hook guard (v1.1), reading the
+*newest* DTC copy from the temp file, in-memory render dedupe, version-stamped CI
+builds, the ADF frequency cross-check shown beneath resolved beacon names, an
+audible confirmation sound on kneeboard generation, real-world emitter subtitles
+on the SPO-15 threats, an on-demand **Regenerate Kneeboard** button (force-renders
+for mid-flight DTC edits made in the jet, and as a spawn-detection fallback), and
+an **Exit button plus single-instance guard** (gotcha 14). Remaining: a global
+**regenerate hotkey** (reuses the regenerate path), then broader testing.
 
 ## Conventions (non-negotiable)
 
@@ -165,6 +166,36 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     `sounds/kneeboard_generated.wav` (winsound needs a PCM WAV); winsound plays to
     the Windows *default* output device, so in VR the headset must be that device.
     Any playback failure is caught and logged, never raised.
+13. **The manual regenerate path runs off the Tk thread and reuses the sound
+    callback.** The "Regenerate Kneeboard" button (`main.py._on_regenerate_clicked`)
+    calls `watcher.generate_kneeboard(force=True)` on a short daemon worker thread
+    (so the temp-dir scan and Pillow render never freeze the GUI), then marshals the
+    result back onto the Tk loop via the existing `_command_queue` pump
+    (`_on_regenerate_done`). `force=True` bypasses the in-memory dedupe (the user
+    explicitly asked for a fresh page). The button is disabled while a rebuild is in
+    flight (an `_regenerating` flag, set/cleared only on the Tk thread). Do NOT play
+    the confirmation sound in the handler: a forced render still fires the watcher's
+    `on_generated` callback (gotcha 12), so playing it here would double up. A
+    `None` return surfaces a friendly summary in the status log; `generate_kneeboard`
+    has already logged the specific reason on the line above.
+14. **Close (X) minimises to the tray; only the Exit button (or the tray's Quit)
+    actually quits, and a single-instance guard stops duplicates.** Because X only
+    withdraws to the tray (correct for a background watcher), it is easy to forget a
+    copy is running and launch another. Two instances both poll the one trigger
+    file; whichever polls first consumes (deletes) it and renders, while the *other*
+    instance's status log stays silent - the symptom is "the status window did not
+    show the spawn, but the sound played and the JPG appeared". The smoking gun in
+    the log is two different PyInstaller `_MEIPASS` temp dirs in the "playing
+    confirmation sound (...)" lines: one process keeps ONE `_MEIPASS` for its whole
+    life, so two distinct dirs means two processes. Fixes (both in `main.py`): a red
+    **Exit** button at the top-right of the Settings card that calls `_quit_app`, and
+    `_acquire_single_instance()` - a named Windows mutex (`SINGLE_INSTANCE_MUTEX`,
+    held for the process lifetime and released by the OS on exit, so there is no
+    stale lock). A second launch shows a native "already running" message box and
+    exits. Windows-only and never raises (a detection failure must not stop the app
+    starting). The mutex name is version-independent, so every guard-bearing build
+    blocks every other; only pre-guard builds (before v1.1.0) can still run in
+    parallel.
 
 ## Build, run, test
 

@@ -91,7 +91,7 @@ The external utility checks this version on startup and updates the hook automat
 
 ### Startup flow
 
-1. Exe launches, GUI window opens (NOT minimised to tray).
+1. Exe launches. **Single-instance check** (named Windows mutex): if another copy is already running, show an "already running" message box and exit. Otherwise the GUI window opens (NOT minimised to tray).
 2. Reads `config.json` from same directory as exe. If missing, runs first-time setup:
    a. Auto-detects DCS install directory (Windows registry `HKLM\SOFTWARE\Eagle Dynamics\DCS World`, then scans common paths: `C:\Program Files\Eagle Dynamics\DCS World`, `D:\DCS World`, `E:\DCS World`)
    b. Auto-detects DCS Saved Games directory (`%USERPROFILE%\Saved Games\DCS\`)
@@ -109,10 +109,18 @@ The external utility checks this version on startup and updates the hook automat
 Built with customtkinter. Single window with:
 
 - **Settings section (top):**
+  - Exit button (top-right, red): quits the app fully, visually distinct from the
+    close (X) button which only minimises to the tray
   - DCS install path — text field + Browse button, auto-filled
   - DCS Saved Games path — text field + Browse button, auto-filled
   - DCS temp directory — text field + Browse button, auto-filled
   - Save Settings button
+
+- **Controls row (middle):**
+  - Regenerate Kneeboard button: on demand, force-renders the kneeboard from the
+    most recent DTC in the temp dir (bypasses the change dedupe), for mid-flight
+    DTC edits or as a spawn-detection fallback. Runs on a worker thread so the GUI
+    never freezes; a failure (no DTC found, etc.) shows a friendly status message
 
 - **Status/log section (bottom):**
   - Scrolling text log area showing timestamped activity messages
@@ -120,8 +128,11 @@ Built with customtkinter. Single window with:
 
 - **Window behaviour:**
   - Close (X) button: minimises to system tray, does not quit
+  - Exit button (or the tray's Quit): fully quits the app
   - System tray icon: left-click restores window, right-click menu has Restore / Quit
   - On launch: window opens visible (not minimised)
+  - Single-instance: only one copy runs at a time (named Windows mutex); a second
+    launch shows an "already running" message box and exits
 
 ### Trigger detection
 
@@ -394,6 +405,10 @@ Pill-style fixed-width chip (min 90px wide, 36px tall, no border radius). Text: 
 | Multiple .bin files from previous missions | Watcher uses most recently modified file matching the heuristic |
 | beacons.lua not found | ADF section falls back to raw frequency display |
 | DTC has no data in a section | Section renders with "NO CONFIG" empty state |
+| Mid-flight DTC edit (no respawn) | No trigger fires (no slot change). The pilot clicks **Regenerate Kneeboard**, which force-renders from the newest temp `.bin`. |
+| Regenerate clicked with no MiG-29 DTC present | `generate_kneeboard` returns `None`; the GUI shows a friendly "no DTC found" message, no crash. |
+| Second app instance launched | Single-instance guard (named mutex) shows "already running" and exits; the first instance keeps running. |
+| Close (X) vs Exit | X minimises to the system tray (keeps watching); the Exit button / tray Quit fully quit the app. |
 
 ---
 
