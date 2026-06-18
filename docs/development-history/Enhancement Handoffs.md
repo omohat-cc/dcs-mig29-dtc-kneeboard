@@ -153,7 +153,7 @@ hints, docstrings, file I/O in try/except.
 
 **Verify on the Mac (no Windows needed):** run `App/render_test_kneeboards.py`,
 which renders the sample DTCs into `App/test_output/`, and eyeball the ADF section
-on the Syria/ADF sample. Also `ruff check` and `py_compile`. Then ask me to commit.
+on the Syria/ADF sample. Also `ruff check` and `py_compile`. Let me review the sample output, then ask me to commit.
 --- PROMPT END ---
 
 ---
