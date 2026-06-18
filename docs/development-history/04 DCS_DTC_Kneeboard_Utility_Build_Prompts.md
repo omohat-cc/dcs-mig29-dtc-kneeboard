@@ -151,7 +151,7 @@ Implementation details:
 - JetBrains Mono Medium (500)
 - JetBrains Mono Bold (700)
 
-**Layout (Omar's Grid):**
+**Layout (Developer's Grid):**
 - Header: full width, ~150px height
 - Row 1: Waypoints | Airdromes | RSBN (three equal columns, ~420px total)
 - Row 2: ADF spanning ~2/3 width | empty space right

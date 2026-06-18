@@ -3,7 +3,7 @@
 This module renders a 1536x2048 JPEG kneeboard summarising one DTC program. It
 consumes the resolved data produced by :mod:`dtc_processor` (either a
 ``ProcessedDTC`` instance or its ``to_dict()`` form) and lays it out on the
-fixed "Omar's Grid":
+fixed "Developer's Grid":
 
     [            Header (full width)              ]
     [ Waypoints | Airdromes | RSBN  ]              (row 1, 3 equal cards)

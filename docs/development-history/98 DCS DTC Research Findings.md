@@ -26,7 +26,7 @@ This is the recommended context for the DCS-side trigger component. Files placed
 - `DCS.getPlayerCoalition()` returns coalition string (e.g. `"blue"`).
 - `DCS.getMissionName()`, `DCS.getMissionFilename()`, `DCS.getTheatreID()`, `DCS.isMultiplayer()` all work.
 - `DCS.getCurrentMission()` returns a deep Lua table of the full mission structure (coalitions, countries, groups, units). No DTC data was found in this table, but it's useful for mission context.
-- `lfs.writedir()` returns the Saved Games DCS path (e.g. `C:\Users\Omar\Saved Games\DCS\`).
+- `lfs.writedir()` returns the Saved Games DCS path (e.g. `C:\Users\<user>\Saved Games\DCS\`).
 - `io.open()` works for reading and writing files within and outside the DCS directory tree.
 - `os.getenv()` works (e.g. `LOCALAPPDATA`, `USERPROFILE`).
 - `os.date()`, `os.clock()` work normally.
@@ -99,7 +99,7 @@ DTC data is serialised by DCS into binary temp files at:
 %LOCALAPPDATA%\Temp\DCS\
 ```
 
-For example: `C:\Users\Omar\AppData\Local\Temp\DCS\`
+For example: `C:\Users\<user>\AppData\Local\Temp\DCS\`
 
 **File characteristics:**
 
@@ -318,11 +318,11 @@ This is a parsed and trimmed sample from `~tr00000829(contention).bin`, showing 
 | Item | Path / Value |
 |---|---|
 | DCS install | `D:\DCS World` |
-| Saved Games | `C:\Users\Omar\Saved Games\DCS\` |
-| DCS temp dir | `C:\Users\Omar\AppData\Local\Temp\DCS\` |
-| Kneeboard output | `C:\Users\Omar\Saved Games\DCS\Kneeboards\MiG-29A Fulcrum\` |
-| Hook scripts | `C:\Users\Omar\Saved Games\DCS\Scripts\Hooks\` |
-| Probe log | `C:\Users\Omar\Saved Games\DCS\Logs\dtc_probe_log.txt` |
+| Saved Games | `C:\Users\<user>\Saved Games\DCS\` |
+| DCS temp dir | `C:\Users\<user>\AppData\Local\Temp\DCS\` |
+| Kneeboard output | `C:\Users\<user>\Saved Games\DCS\Kneeboards\MiG-29A Fulcrum\` |
+| Hook scripts | `C:\Users\<user>\Saved Games\DCS\Scripts\Hooks\` |
+| Probe log | `C:\Users\<user>\Saved Games\DCS\Logs\dtc_probe_log.txt` |
 | DCS version | 2.9.26.23303 |
 
 ---

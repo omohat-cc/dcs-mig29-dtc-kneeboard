@@ -344,7 +344,7 @@ Pill-style fixed-width chip (min 90px wide, 36px tall, no border radius). Text: 
 - Bottom hatched rule
 - Section header band remains unchanged
 
-### Page layout (Omar's Grid)
+### Page layout (Developer's Grid)
 
 ```
 [              Header (full width)                    ]
@@ -375,8 +375,8 @@ Pill-style fixed-width chip (min 90px wide, 36px tall, no border radius). Text: 
 {
     "version": 1,
     "dcs_install_path": "D:\\DCS World",
-    "dcs_saved_games_path": "C:\\Users\\Omar\\Saved Games\\DCS",
-    "dcs_temp_path": "C:\\Users\\Omar\\AppData\\Local\\Temp\\DCS",
+    "dcs_saved_games_path": "C:\\Users\\<user>\\Saved Games\\DCS",
+    "dcs_temp_path": "C:\\Users\\<user>\\AppData\\Local\\Temp\\DCS",
     "hook_version": "1.0"
 }
 ```

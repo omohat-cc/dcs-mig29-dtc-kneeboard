@@ -159,7 +159,7 @@ Status values should be visually distinct: consider using colour or weight to di
 
 I need **four different layout variations** of this kneeboard, each rendered as a full 1536x2048 mockup with the sample data above. All four share the same header and data; they differ only in how the sections are arranged on the page.
 
-### Layout 1: "Omar's Grid"
+### Layout 1: "Developer's Grid"
 
 ```
 [              Header (full width)              ]

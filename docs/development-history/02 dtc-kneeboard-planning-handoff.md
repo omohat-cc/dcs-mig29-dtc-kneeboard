@@ -197,13 +197,13 @@ idxFlareSalvoInterval (seconds between salvos):
 | Item | Path / Value |
 |---|---|
 | DCS install | `D:\DCS World` |
-| Saved Games | `C:\Users\Omar\Saved Games\DCS\` |
-| DCS temp dir | `C:\Users\Omar\AppData\Local\Temp\DCS\` |
-| Kneeboard output | `C:\Users\Omar\Saved Games\DCS\Kneeboard\MiG-29 Fulcrum\` (needs verification) |
-| Hook scripts | `C:\Users\Omar\Saved Games\DCS\Scripts\Hooks\` |
+| Saved Games | `C:\Users\<user>\Saved Games\DCS\` |
+| DCS temp dir | `C:\Users\<user>\AppData\Local\Temp\DCS\` |
+| Kneeboard output | `C:\Users\<user>\Saved Games\DCS\Kneeboard\MiG-29 Fulcrum\` (needs verification) |
+| Hook scripts | `C:\Users\<user>\Saved Games\DCS\Scripts\Hooks\` |
 | DCS version | 2.9.26.23303 |
-| Dev machine | MacBook Air (development in Claude Code) |
-| Target machine | Windows gaming PC (testing and runtime) |
+| Dev machine | Mac (development in Claude Code) |
+| Target machine | Windows PC (testing and runtime) |
 
 ---
 

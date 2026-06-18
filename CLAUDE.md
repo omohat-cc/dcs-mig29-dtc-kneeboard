@@ -63,7 +63,7 @@ DTC Kneeboard Utility/
 │   ├── bin_parser.py             extract the DTC JSON from ~tr*.bin temp files
 │   ├── dtc_processor.py          resolve DTC JSON -> display-ready sections (ProcessedDTC)
 │   ├── beacon_parser.py          parse beacons.lua -> {freq_khz: station} ADF lookup
-│   ├── kneeboard_renderer.py     Pillow: draw the 1536x2048 JPEG ("Omar's Grid")
+│   ├── kneeboard_renderer.py     Pillow: draw the 1536x2048 JPEG ("Developer's Grid")
 │   ├── hook_template.lua         the Lua hook source (bundled; copied into Saved Games)
 │   ├── fonts/                    8 bundled TTFs + their OFL-*.txt licence texts
 │   ├── icon.ico / icon.png       window + exe icon (committed assets)
