@@ -1,10 +1,10 @@
 # DCS MiG-29A DTC Kneeboard Utility
 
-Auto-generates a kneeboard page summarising your MiG-29A's Data Transfer
-Cartridge (DTC) every time you spawn into the jet in DCS World. No more
-screenshotting the mission planner: the moment you occupy a MiG-29A slot, the
-utility reads the DTC you loaded and renders it as a clean, readable kneeboard
-page in the in-game kneeboard.
+Auto-generates a single kneeboard page summarising all your MiG-29A's Data
+Transfer Cartridge (DTC) information every time you spawn into the jet in DCS
+World. No more screenshotting the mission planner: the moment you occupy a
+MiG-29A slot, the utility reads the DTC you loaded and renders it as a clean,
+readable page for the in-game kneeboard.
 
 <p align="center">
   <img src="docs/images/dtc-kneeboard-sample.jpg" width="380"
@@ -16,9 +16,22 @@ page in the in-game kneeboard.
 ## What it shows
 
 A single 1536x2048 kneeboard page with the contents of your loaded DTC,
-including navigation/tactical points, radio-navigation channels, ADF
-beacons (resolved to station names for the current map, each shown with its
-frequency for cross-checking) and SPO-15 launch warning settings.
+including navigation/tactical points, radio-navigation channels, ADF beacons
+(resolved to station names for the current map, each shown with its frequency
+for cross-checking), SPO-15 launch warning settings, and countermeasure
+settings.
+
+## Why use this instead of the ED default kneeboard pages
+
+ED recently added more pages to their generated kneeboard. Previously they only
+showed the waypoints, aerodromes, and RSBN stations. Now they also added SPO-15
+and radio-channel pages, but they spread the information out over five or six
+pages. This utility puts all the DTC information onto a single, well-laid-out
+page.
+
+It also resolves the raw ADF frequencies to airport names, meaning you can use
+the 8 ADF stations as bearing-only waypoints to complement the 6
+bearing-and-distance waypoints/aerodromes.
 
 ## How it works
 
@@ -39,25 +52,28 @@ the mission and no game files are modified; the hook uses DCS's official
 
 The app sits in the system tray while you fly: closing the window (X) minimises
 it there, the **Exit** button (or the tray's Quit) closes it for good, and only
-one copy runs at a time. If you edit the DTC in the cockpit after spawning, click
-**Regenerate Kneeboard** to rebuild the page on demand (the automatic trigger
-only fires on a fresh MiG-29 spawn, not on a mid-flight edit).
+one copy runs at a time. If you edit the DTC in the cockpit after spawning,
+click **Regenerate Kneeboard** to rebuild the page on demand (the automatic
+trigger only fires on a fresh MiG-29 spawn, not on a mid-flight edit).
 
 ## Installation
 
 1. Download `DCS_DTC_Kneeboard.exe` from the
    [latest release](../../releases/latest).
-2. Put it in any user-writable folder (not `C:\Program Files`) and run it.
-   `config.json` and a log file are written next to the exe.
+2. Put it in any user-writable folder such as Documents or Downloads (not
+   `C:\Program Files`) and run it. `config.json` and a log file are written
+   next to the exe.
 3. On first run the app auto-detects your DCS install, Saved Games and temp
    paths (and prompts for anything it cannot find), then installs/updates the
    hook.
-4. Start DCS, jump into a MiG-29A with a DTC loaded, and check your kneeboard
-   on the next spawn.
+4. Start DCS, slot into a MiG-29A with a DTC loaded, and check your kneeboard
+   after giving the app a few seconds to read the config and generate a page
+   (you can watch the status window to see when the page is ready, or just
+   listen for the printer sound that confirms the kneeboard has been generated).
 
-> **SmartScreen / antivirus note:** the exe is an unsigned PyInstaller
-> single-file build, which Windows sometimes flags. Build it yourself from
-> source (below) or check the release's CI build provenance if in doubt.
+> **SmartScreen / antivirus note:** the exe is an unsigned single-file build,
+> which Windows sometimes flags. Build it yourself from source (below) or check
+> the release's CI build provenance if in doubt.
 
 ### Running from source
 
