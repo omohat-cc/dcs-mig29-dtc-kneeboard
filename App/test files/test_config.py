@@ -79,7 +79,8 @@ def test_dataclass(checks: Checks) -> None:
                  config.AppConfig.from_dict(cfg.to_json_dict()) == cfg)
 
     schema_keys = {"version", "dcs_install_path", "dcs_saved_games_path",
-                   "dcs_temp_path", "hook_version"}
+                   "dcs_temp_path", "hook_version",
+                   "ground_poll_seconds", "state_stale_seconds"}
     checks.check("to_json_dict has exactly the schema keys",
                  set(cfg.to_json_dict().keys()) == schema_keys)
 
@@ -91,6 +92,44 @@ def test_dataclass(checks: Checks) -> None:
     blanks = config.AppConfig.from_dict({"dcs_temp_path": "   ", "hook_version": ""})
     checks.check("from_dict normalises blank strings to None",
                  blanks.dcs_temp_path is None and blanks.hook_version is None)
+
+
+def test_timing_fields(checks: Checks) -> None:
+    _banner("TIMING FIELDS  -  ground_poll / state_stale defaults, clamp, back-compat")
+    cfg = config.AppConfig()
+    checks.check("ground_poll_seconds default is 5.0", cfg.ground_poll_seconds == 5.0)
+    checks.check("state_stale_seconds default is 30.0", cfg.state_stale_seconds == 30.0)
+    checks.check("CONFIG_VERSION bumped to 2", config.CONFIG_VERSION == 2)
+
+    # Explicit values round-trip through to_json_dict / from_dict.
+    cfg2 = config.AppConfig(ground_poll_seconds=8.0, state_stale_seconds=45.0)
+    back = config.AppConfig.from_dict(cfg2.to_json_dict())
+    checks.check("new timing fields round-trip",
+                 back.ground_poll_seconds == 8.0 and back.state_stale_seconds == 45.0)
+
+    # The ground interval is clamped to a 2.0s floor; a value above it is kept.
+    low = config.AppConfig.from_dict({"ground_poll_seconds": 0.5})
+    checks.check("ground_poll_seconds below floor clamps to 2.0",
+                 low.ground_poll_seconds == 2.0, str(low.ground_poll_seconds))
+    high = config.AppConfig.from_dict({"ground_poll_seconds": 10})
+    checks.check("ground_poll_seconds above floor is kept",
+                 high.ground_poll_seconds == 10.0, str(high.ground_poll_seconds))
+    bad = config.AppConfig.from_dict({"ground_poll_seconds": "oops", "state_stale_seconds": None})
+    checks.check("non-numeric timing values fall back to defaults",
+                 bad.ground_poll_seconds == 5.0 and bad.state_stale_seconds == 30.0)
+
+    # Back-compat: an old v1 config without the new keys loads with defaults.
+    old = config.AppConfig.from_dict({
+        "version": 1,
+        "dcs_install_path": "D:\\DCS World",
+        "dcs_saved_games_path": "C:\\sg",
+        "dcs_temp_path": "C:\\tmp",
+        "hook_version": "1.1",
+    })
+    checks.check("old config (no new keys) -> default timing",
+                 old.ground_poll_seconds == 5.0 and old.state_stale_seconds == 30.0)
+    checks.check("old config still loads its existing fields",
+                 old.dcs_install_path == "D:\\DCS World" and old.hook_version == "1.1")
 
 
 def test_validators(checks: Checks) -> None:
@@ -171,6 +210,7 @@ def test_autodetect(checks: Checks) -> None:
 def main() -> int:
     checks = Checks()
     test_dataclass(checks)
+    test_timing_fields(checks)
     test_validators(checks)
     test_load_save(checks)
     test_autodetect(checks)

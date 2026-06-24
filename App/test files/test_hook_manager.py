@@ -79,7 +79,10 @@ def test_version_parsing(checks: Checks) -> None:
                  hm.parse_hook_version("") is None and hm.parse_hook_version(None) is None)
 
     checks.check("1.0 < 1.1 is outdated", hm.is_outdated("1.0", "1.1"))
+    checks.check("1.1 < 1.2 is outdated (installed v1.1 -> update to v1.2)",
+                 hm.is_outdated("1.1", "1.2"))
     checks.check("1.1 vs 1.0 is not outdated", not hm.is_outdated("1.1", "1.0"))
+    checks.check("1.2 vs 1.2 is not outdated", not hm.is_outdated("1.2", "1.2"))
     checks.check("Unversioned existing -> outdated", hm.is_outdated(None, "1.0"))
     checks.check("Unknown bundled -> never outdated", not hm.is_outdated("1.0", None))
     checks.check("Numeric (not lexical) compare: 1.10 > 1.9",
@@ -92,7 +95,7 @@ def test_bundled_template(checks: Checks) -> None:
     if not checks.check("Bundled hook_template.lua is present and readable", bool(text)):
         return
 
-    checks.check("Bundled version is 1.1", hm.bundled_hook_version() == "1.1")
+    checks.check("Bundled version is 1.2", hm.bundled_hook_version() == "1.2")
     checks.check("Line 1 is the version comment",
                  text.splitlines()[0].startswith("-- dtc_kneeboard_hook v"))
 
@@ -110,6 +113,21 @@ def test_bundled_template(checks: Checks) -> None:
     missing = [token for token in required if token not in text]
     checks.check("Template contains all required behaviours", not missing,
                  f"missing: {missing}" if missing else "all present")
+
+    # v1.2 air/ground state machine: the new behaviours must all be present.
+    state_machine = [
+        "onSimulationStop",                       # registered for slot/menu exit
+        "writeState",                             # publishes the phase
+        "dtc_kneeboard_state.json",               # the state-file contract
+        "LoGetAltitudeAboveGroundLevel",          # the AGL read (Export.*)
+        "migActive",                              # state-machine gate, kept separate
+        '"air"',                                  # the three phases
+        '"ground"',
+        '"none"',
+    ]
+    missing_sm = [token for token in state_machine if token not in text]
+    checks.check("Template contains the v1.2 state machine", not missing_sm,
+                 f"missing: {missing_sm}" if missing_sm else "all present")
 
     # Spec section 2 forbids these in the hooks context. Check the code only:
     # the header comment legitimately names them while documenting their absence.

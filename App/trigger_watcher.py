@@ -16,6 +16,10 @@ on each fresh trigger, runs the full pipeline (technical spec, sections 3 and 6)
 Design points:
 
 * The watch loop runs on a daemon thread, started/stopped from the GUI.
+* Alongside the trigger, the loop reads the hook's air/ground state file (Item
+  5): while parked on the ground it change-checks the DTC temp file on a slow
+  cadence and regenerates on a real edit; airborne it pauses. Phase transitions
+  surface to the GUI via an optional ``on_phase_change`` callback.
 * Every sleep is an interruptible ``Event.wait`` so :meth:`TriggerWatcher.stop`
   returns promptly.
 * Status messages go both to the standard logging module and to an optional
@@ -29,17 +33,24 @@ Only the standard library plus the sibling app modules are imported (no
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import logging
+import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Union
 
 from beacon_parser import BeaconResolver
-from bin_parser import extract_dtc_from_directory
-from config import AppConfig
+from bin_parser import BIN_GLOB, MAX_FILE_SIZE, MIN_FILE_SIZE, extract_dtc_from_directory
+from config import (
+    DEFAULT_GROUND_POLL_SECONDS,
+    DEFAULT_STATE_STALE_SECONDS,
+    AppConfig,
+)
 from dtc_processor import DTCProcessingError, ProcessedDTC, process_dtc
 from kneeboard_renderer import KneeboardRenderError, render_kneeboard
 
@@ -50,6 +61,9 @@ LogCallback = Callable[[str], None]
 # Invoked with the output JPEG path after a successful render (see
 # generate_kneeboard); used by the GUI to play the "kneeboard generated" sound.
 OnGeneratedCallback = Callable[[Path], None]
+# Invoked with the derived watch phase ("ground" / "air" / "none") whenever it
+# changes; used by the GUI to update its DTC Watch label. Must not raise.
+OnPhaseChangeCallback = Callable[[str], None]
 
 # Timing defaults (technical spec, section 3).
 DEFAULT_POLL_INTERVAL = 2.0        # seconds between trigger-file polls
@@ -58,6 +72,9 @@ DEFAULT_MAX_TRIGGER_AGE = 300.0    # seconds; triggers older than this are stale
 
 # Locations relative to the Saved Games directory.
 TRIGGER_SUBPATH = ("Logs", "dtc_kneeboard_trigger.json")
+# The hook's air/ground state file (Item 5): the hook writes it, the watcher
+# reads it to decide whether to poll the temp file while parked.
+STATE_SUBPATH = ("Logs", "dtc_kneeboard_state.json")
 # Note: "Kneeboard" (no 's'), "MiG-29 Fulcrum" (with space) per spec section 3.
 # The "000_" prefix sorts the page first in DCS's kneeboard page order.
 OUTPUT_SUBPATH = ("Kneeboard", "MiG-29 Fulcrum", "000_dtc_config.jpg")
@@ -66,6 +83,27 @@ OUTPUT_SUBPATH = ("Kneeboard", "MiG-29 Fulcrum", "000_dtc_config.jpg")
 # JPEG. The dedupe is now in-memory only, so any such file is stale; it is
 # deleted on sight so it never lingers in the player's kneeboard folder.
 LEGACY_SIDECAR_SUFFIX = ".fingerprint.json"
+
+
+def _iso_age_seconds(timestamp: object) -> Optional[float]:
+    """Return the age in seconds of an ISO 8601 UTC stamp, or ``None``.
+
+    Accepts the hook's ``...Z`` stamps. Returns ``None`` for a missing or
+    unparseable value (the caller then treats the source as not live). Quiet by
+    design (no logging), as it is called on the state file every poll.
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    text = timestamp.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - parsed).total_seconds()
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +180,9 @@ class TriggerWatcher:
         post_trigger_delay: float = DEFAULT_POST_TRIGGER_DELAY,
         max_trigger_age: float = DEFAULT_MAX_TRIGGER_AGE,
         on_generated: Optional[OnGeneratedCallback] = None,
+        on_phase_change: Optional[OnPhaseChangeCallback] = None,
+        ground_poll_seconds: Optional[float] = None,
+        state_stale_seconds: Optional[float] = None,
     ) -> None:
         """Args:
             config: Loaded application configuration (supplies the DCS paths).
@@ -156,6 +197,15 @@ class TriggerWatcher:
                 after a successful render (never on a dedupe skip or failure).
                 Used by the GUI to play a confirmation sound. It must not raise;
                 any exception is caught and logged so the pipeline is unaffected.
+            on_phase_change: Optional callable invoked with the derived watch
+                phase ("ground" / "air" / "none") whenever it changes. Same
+                safety contract as ``on_generated``; the GUI uses it to update
+                the DTC Watch label (marshalled onto the Tk loop by the caller).
+            ground_poll_seconds: Override for the on-ground temp-file check
+                cadence; defaults to the config value (or 5.0).
+            state_stale_seconds: Override for how old the hook's state file may
+                be before it is treated as "no live DCS"; defaults to the config
+                value (or 30.0).
         """
         self._config = config
         self._log_callback = log_callback
@@ -163,6 +213,17 @@ class TriggerWatcher:
         self._post_trigger_delay = post_trigger_delay
         self._max_trigger_age = max_trigger_age
         self._on_generated = on_generated
+        self._on_phase_change = on_phase_change
+        # Item 5 timing: an explicit override wins, else the config value (which
+        # is already clamped on load), else the module default.
+        self._ground_poll_seconds = (
+            ground_poll_seconds if ground_poll_seconds is not None
+            else getattr(config, "ground_poll_seconds", DEFAULT_GROUND_POLL_SECONDS)
+        )
+        self._state_stale_seconds = (
+            state_stale_seconds if state_stale_seconds is not None
+            else getattr(config, "state_stale_seconds", DEFAULT_STATE_STALE_SECONDS)
+        )
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -174,6 +235,15 @@ class TriggerWatcher:
         # renders and the dedupe can never get "stuck" across sessions.
         self._last_fingerprint: Optional[str] = None
         self._legacy_sidecar_cleaned = False
+
+        # Item 5 ground-poll state (all touched only on the watch thread):
+        #  * _last_phase     - last derived phase, to detect transitions.
+        #  * _last_ground_check - monotonic stamp of the last on-ground bin check.
+        #  * _last_bin_stat  - (name, mtime, size) of the newest .bin at the last
+        #    generation; the cheap change-check compares against it.
+        self._last_phase: str = "none"
+        self._last_ground_check: float = 0.0
+        self._last_bin_stat: Optional[tuple[str, float, int]] = None
 
     # --- construction helpers ---------------------------------------------
     @staticmethod
@@ -213,6 +283,12 @@ class TriggerWatcher:
         """Full path to the output kneeboard JPEG, if the Saved Games path is set."""
         base = self.saved_games_path
         return base.joinpath(*OUTPUT_SUBPATH) if base else None
+
+    @property
+    def state_path(self) -> Optional[Path]:
+        """Full path to the hook's state file, if the Saved Games path is set."""
+        base = self.saved_games_path
+        return base.joinpath(*STATE_SUBPATH) if base else None
 
     # --- logging -----------------------------------------------------------
     def _log(self, message: str, level: int = logging.INFO) -> None:
@@ -266,11 +342,39 @@ class TriggerWatcher:
             self._stop_event.wait(self._poll_interval)
 
     def poll_once(self) -> Optional[Path]:
-        """Run one poll: if a fresh trigger exists, consume it and regenerate.
+        """Run one watch poll: update the phase, handle a trigger, ground-check.
+
+        Order each poll:
+          1. Read the hook's state file and emit any phase transition (label +
+             log). This is cheap and runs every poll so the label stays live.
+          2. The unchanged trigger path: a fresh spawn trigger renders once.
+          3. While the derived phase is "ground", an independent (cadenced)
+             change-check regenerates if the DTC temp file changed.
 
         Returns:
-            The rendered kneeboard path if one was generated this poll, else
-            ``None`` (no trigger, a stale/invalid trigger, or a pipeline error).
+            The rendered kneeboard path if one was generated this poll (trigger-
+            driven OR ground-driven), else ``None``.
+        """
+        phase = self._update_phase()
+
+        triggered = self._poll_trigger()
+        if triggered is not None:
+            # A spawn render happened: sync the ground baseline to the file we
+            # just rendered so the ground check does not immediately re-fire for
+            # the same write (gotcha: keep the two paths in step).
+            self._last_bin_stat = self._current_bin_stat()
+            return triggered
+
+        if phase == "ground":
+            return self._ground_check()
+        return None
+
+    def _poll_trigger(self) -> Optional[Path]:
+        """The trigger path (unchanged): consume a fresh trigger and regenerate.
+
+        Returns the rendered path if a trigger was acted on and produced an
+        image, else ``None`` (no trigger, a stale/invalid trigger, a dedupe skip
+        or a pipeline error).
         """
         trigger = self.trigger_path
         if trigger is None or not trigger.exists():
@@ -286,6 +390,128 @@ class TriggerWatcher:
             self._log("Watcher stopping; abandoning this trigger.")
             return None
         return self.generate_kneeboard(trigger_data)
+
+    # --- air/ground state (Item 5) -----------------------------------------
+    def read_state(self) -> str:
+        """Return the live air/ground phase the hook published.
+
+        Reads ``<Saved Games>/Logs/dtc_kneeboard_state.json`` and returns one of
+        ``"ground"``, ``"air"`` or ``"none"``. A missing file, an unreadable or
+        invalid file, an unrecognised phase, or a timestamp older than
+        ``state_stale_seconds`` (or absent) all yield ``"none"`` - i.e. no live
+        DCS, so the app shows Waiting and stays trigger-only, exactly like an
+        older hook that never wrote this file. Never raises.
+        """
+        path = self.state_path
+        if path is None or not path.exists():
+            return "none"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return "none"
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug("Could not read state file %s: %s", path, exc)
+            return "none"
+
+        phase = data.get("phase")
+        if phase not in ("ground", "air"):
+            return "none"
+        # A missing or stale timestamp means the hook/DCS is no longer live.
+        age = _iso_age_seconds(data.get("ts"))
+        if age is None or age > self._state_stale_seconds:
+            return "none"
+        return phase
+
+    def _update_phase(self) -> str:
+        """Read the phase, log + notify on a transition, and return it."""
+        phase = self.read_state()
+        if phase == self._last_phase:
+            return phase
+
+        previous = self._last_phase
+        self._last_phase = phase
+        if phase == "ground":
+            # Check the temp file promptly on (re)entering the ground phase.
+            self._last_ground_check = 0.0
+            if previous == "air":
+                self._log("Back on the ground - DTC watch resumed.")
+            else:
+                self._log(
+                    "MiG-29 on the ground - watching DTC for changes "
+                    f"(every {int(self._ground_poll_seconds)}s)."
+                )
+        elif phase == "air":
+            self._log("Airborne - DTC watch paused.")
+        else:  # none
+            self._log("No live DCS state - watching for the next spawn trigger only.")
+        self._notify_phase_change(phase)
+        return phase
+
+    def _notify_phase_change(self, phase: str) -> None:
+        """Invoke the phase-change callback, if set. Never raises into the loop."""
+        if self._on_phase_change is None:
+            return
+        try:
+            self._on_phase_change(phase)
+        except Exception:  # noqa: BLE001 - a callback must never break the loop
+            logger.exception("on_phase_change callback raised")
+
+    def _current_bin_stat(self) -> Optional[tuple[str, float, int]]:
+        """Cheaply identify the newest candidate ``~tr*.bin`` (no content read).
+
+        Scans the temp dir for size-banded ``~tr*.bin`` files and returns
+        ``(name, mtime, size)`` of the newest by mtime, or ``None`` if the temp
+        path is unset/missing or nothing qualifies. Uses :func:`os.scandir`, so
+        the size/mtime come from the directory entry without an extra read - safe
+        to call every few seconds. Never raises.
+        """
+        temp = self.temp_path
+        if temp is None:
+            return None
+        try:
+            newest: Optional[tuple[str, float, int]] = None
+            with os.scandir(temp) as entries:
+                for entry in entries:
+                    if not fnmatch.fnmatch(entry.name, BIN_GLOB):
+                        continue
+                    try:
+                        if not entry.is_file():
+                            continue
+                        stat = entry.stat()
+                    except OSError:
+                        continue
+                    if stat.st_size < MIN_FILE_SIZE or stat.st_size > MAX_FILE_SIZE:
+                        continue
+                    if newest is None or stat.st_mtime > newest[1]:
+                        newest = (entry.name, stat.st_mtime, stat.st_size)
+            return newest
+        except OSError as exc:
+            logger.debug("Could not scan temp dir %s for the ground check: %s", temp, exc)
+            return None
+
+    def _ground_check(self) -> Optional[Path]:
+        """While parked, regenerate if the newest DTC temp file changed.
+
+        Runs at most every ``ground_poll_seconds``. The cheap ``(name, mtime,
+        size)`` signature means an unchanged temp dir does no parse or render. On
+        a change it calls ``generate_kneeboard(force=False)`` so the content
+        fingerprint dedupe still suppresses a needless redraw when a re-applied
+        DTC is byte-for-byte identical (only a genuine edit redraws). The
+        baseline is updated after the check so the same write never fires twice.
+        Never raises (the caller wraps the loop, but this stays self-contained).
+        """
+        now = time.monotonic()
+        if now - self._last_ground_check < self._ground_poll_seconds:
+            return None
+        self._last_ground_check = now
+
+        current = self._current_bin_stat()
+        if current is None or current == self._last_bin_stat:
+            return None  # nothing new on disk: no parse, no render
+
+        self._last_bin_stat = current
+        self._log("DTC change detected on the ground - regenerating kneeboard.")
+        return self.generate_kneeboard(force=False)
 
     # --- trigger handling --------------------------------------------------
     def _consume_trigger(self, trigger: Path) -> Optional[dict]:
