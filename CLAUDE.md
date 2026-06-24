@@ -14,20 +14,31 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
    customtkinter GUI that watches for the trigger, extracts the DTC from DCS's
    binary temp files, resolves it, and renders the kneeboard image.
 
-## Status (2026-06-17)
+## Status (2026-06-24)
 
 Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
 live-tested in single-player and on a populated multiplayer server. All modules,
 the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
-macOS; built via GitHub Actions (Windows runner). **Released as v1.1.0.** Recent
-enhancements (all live-confirmed): the multiplayer hook guard (v1.1), reading the
-*newest* DTC copy from the temp file, in-memory render dedupe, version-stamped CI
-builds, the ADF frequency cross-check shown beneath resolved beacon names, an
-audible confirmation sound on kneeboard generation, real-world emitter subtitles
-on the SPO-15 threats, an on-demand **Regenerate Kneeboard** button (force-renders
-for mid-flight DTC edits made in the jet, and as a spawn-detection fallback), and
-an **Exit button plus single-instance guard** (gotcha 14). Remaining: a global
-**regenerate hotkey** (reuses the regenerate path), then broader testing.
+macOS; built via GitHub Actions (Windows runner). **Released as v1.1.0; v1.2.0
+(ground-polling auto-regenerate) is being cut.** Recent enhancements (all
+live-confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy
+from the temp file, in-memory render dedupe, version-stamped CI builds, the ADF
+frequency cross-check shown beneath resolved beacon names, an audible
+confirmation sound on kneeboard generation, real-world emitter subtitles on the
+SPO-15 threats, an on-demand **Regenerate Kneeboard** button, and an **Exit
+button plus single-instance guard** (gotcha 14).
+
+**v1.2.0 - ground-polling auto-regenerate (Item 5, live-confirmed):** the hook
+(v1.2) runs an air/ground state machine off the local AGL and publishes a phase
+to `dtc_kneeboard_state.json`; while parked the app change-checks the DTC temp
+file (~5s) and regenerates on a real edit, pausing airborne. A 3-state **DTC
+Watch** label shows it. This **replaced** the planned global regenerate hotkey
+(collision risk with DCS/SRS/TacView/VoiceAttack). The generation sound now fires
+only on a genuine content change (not a forced re-render of identical content).
+**Key live finding (gotcha 15):** the app renders correctly, but DCS caches the
+native kneeboard page and only reloads it on respawn, so the live ground-watch is
+only visible through a tool that reads the file live (e.g. OpenKneeboard); the
+README documents this limitation. Remaining: broader multiplayer testing.
 
 ## Conventions (non-negotiable)
 
