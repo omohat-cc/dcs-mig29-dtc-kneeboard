@@ -4,11 +4,13 @@ The app keeps a single ``config.json`` next to the executable holding the three
 DCS paths it needs plus the installed hook version (technical spec, section 5):
 
     {
-        "version": 1,
+        "version": 2,
         "dcs_install_path": "D:\\\\DCS World",
         "dcs_saved_games_path": "C:\\\\Users\\\\<user>\\\\Saved Games\\\\DCS",
         "dcs_temp_path": "C:\\\\Users\\\\<user>\\\\AppData\\\\Local\\\\Temp\\\\DCS",
-        "hook_version": "1.0"
+        "hook_version": "1.0",
+        "ground_poll_seconds": 5.0,
+        "state_stale_seconds": 30.0
     }
 
 On first run the three paths are auto-detected:
@@ -43,8 +45,15 @@ logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 CONFIG_FILENAME = "config.json"
+
+# Ground-polling auto-regenerate tuning (Item 5). The watcher reads these when
+# no explicit override is passed; ground_poll_seconds has a sane floor so a
+# hand-edited config cannot make the temp-dir scan run absurdly often.
+DEFAULT_GROUND_POLL_SECONDS = 5.0
+GROUND_POLL_FLOOR_SECONDS = 2.0
+DEFAULT_STATE_STALE_SECONDS = 30.0
 
 # Common DCS install roots to scan if the registry lookup fails (spec section 5).
 _DCS_COMMON_INSTALL_PATHS = (
@@ -76,6 +85,11 @@ class AppConfig:
     dcs_saved_games_path: Optional[str] = None
     dcs_temp_path: Optional[str] = None
     hook_version: Optional[str] = None
+    # How often the watcher checks the DTC temp file while parked on the ground,
+    # and how long the hook's state file may go unrefreshed before it is treated
+    # as "no live DCS" (Item 5).
+    ground_poll_seconds: float = DEFAULT_GROUND_POLL_SECONDS
+    state_stale_seconds: float = DEFAULT_STATE_STALE_SECONDS
 
     def to_json_dict(self) -> dict:
         """Return a plain dict in the documented ``config.json`` key order."""
@@ -85,6 +99,8 @@ class AppConfig:
             "dcs_saved_games_path": self.dcs_saved_games_path,
             "dcs_temp_path": self.dcs_temp_path,
             "hook_version": self.hook_version,
+            "ground_poll_seconds": self.ground_poll_seconds,
+            "state_stale_seconds": self.state_stale_seconds,
         }
 
     @classmethod
@@ -100,10 +116,24 @@ class AppConfig:
             text = str(value).strip()
             return text or None
 
+        def _float_or(value: object, default: float) -> float:
+            try:
+                return float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return default
+
         try:
             version = int(data.get("version", CONFIG_VERSION))
         except (TypeError, ValueError):
             version = CONFIG_VERSION
+
+        # A missing key falls back to the default; the ground interval is clamped
+        # to its floor so a hand-edited value below it can never apply.
+        ground_poll = max(
+            GROUND_POLL_FLOOR_SECONDS,
+            _float_or(data.get("ground_poll_seconds"), DEFAULT_GROUND_POLL_SECONDS),
+        )
+        state_stale = _float_or(data.get("state_stale_seconds"), DEFAULT_STATE_STALE_SECONDS)
 
         return cls(
             version=version,
@@ -111,6 +141,8 @@ class AppConfig:
             dcs_saved_games_path=_opt_str(data.get("dcs_saved_games_path")),
             dcs_temp_path=_opt_str(data.get("dcs_temp_path")),
             hook_version=_opt_str(data.get("hook_version")),
+            ground_poll_seconds=ground_poll,
+            state_stale_seconds=state_stale,
         )
 
 

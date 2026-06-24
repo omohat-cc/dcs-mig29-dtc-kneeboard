@@ -1,4 +1,4 @@
--- dtc_kneeboard_hook v1.1
+-- dtc_kneeboard_hook v1.2
 -- DCS MiG-29 DTC Kneeboard Utility - spawn-detection hook.
 --
 -- Detects when the local player occupies a MiG-29 and writes a small trigger
@@ -10,6 +10,17 @@
 -- whether to update this file. Keep it as the first line.
 --
 -- Changes:
+--   v1.2 - Added an air/ground state machine so the app can auto-regenerate the
+--          kneeboard after a mid-session DTC edit while parked, and pause while
+--          airborne. While in a MiG-29, onSimulationFrame samples our own height
+--          above ground (Export.LoGetAltitudeAboveGroundLevel, local ownship
+--          truth, reliable on a MP client unlike takeoff/landing events) on a
+--          ~1s cadence and, with hysteresis, publishes "ground"/"air"/"none" to
+--          a small state file (dtc_kneeboard_state.json) using the same atomic
+--          write as the trigger, plus a ~10s heartbeat so the app can tell DCS
+--          is still alive. A nil reading (menus, spectating, ownship export off)
+--          leaves the phase unchanged, so the app keeps polling on the ground.
+--          The state machine is fully independent of the v1.1 detection poll.
 --   v1.1 - In multiplayer DCS calls onPlayerChangeSlot for EVERY player's slot
 --          change, not just ours. Each call re-armed the deferred poll, which
 --          re-checked our (still MiG-29) local unit and re-wrote the trigger -
@@ -17,14 +28,15 @@
 --          v1.1 ignores slot changes that are not the local player.
 --
 -- Safety constraints (technical spec, section 2):
---   * Every DCS API call is wrapped in pcall.
+--   * Every DCS / Export API call is wrapped in pcall.
 --   * Never calls DCS.getMissionLoaded() (crashes DCS).
 --   * Does NOT use io.popen (nil in the hooks context).
 --   * Does NOT use lfs.dir() on paths outside DCS (only lfs.writedir()).
---   * Does NOT touch Export.lua - a completely separate Lua context.
+--   * Only CALLS Export.* (available in the hooks state); does NOT modify the
+--     separate Export Lua context.
 --   * Diagnostics go to Saved Games\DCS\Logs\dtc_kneeboard_hook.log via io.open.
 
-local VERSION = "1.1"
+local VERSION = "1.2"
 
 -- Deferred-poll tuning, in simulation frames (the sim loop ticks roughly once
 -- per frame, so ~60 frames is ~1 second at 60 fps).
@@ -33,11 +45,32 @@ local POLL_INTERVAL_FRAMES = 60    -- then poll the unit type every this many
 local MAX_RETRIES          = 30    -- give up after this many polls (~30 seconds)
 local AIRCRAFT_PREFIX      = "MiG-29"  -- prefix match: 29A / 29S / 29G / Fulcrum
 
+-- Air/ground state-machine tuning (v1.2). Frame counts assume ~60 fps; the
+-- thresholds use two bands (hysteresis) so a bump or the takeoff roll cannot
+-- flap the phase. AGL is metres above ground level.
+local STATE_POLL_FRAMES      = 60    -- sample our height about once a second
+local AGL_AIR_M              = 30    -- climb above this (confirmed) -> airborne
+local AGL_GROUND_M          = 10    -- drop below this (confirmed) -> on ground
+local AGL_CONFIRM_SAMPLES   = 3     -- consecutive samples needed to switch phase
+local STATE_HEARTBEAT_FRAMES = 600   -- re-write the state file at least this often
+
 -- Polling state. A slot change (re)starts the sequence; it stops on the first
 -- definitive unit-type result or once the retries are exhausted.
 local pollActive = false
 local frameCount = 0
 local pollCount  = 0
+
+-- Air/ground state-machine state, kept SEPARATE from the detection poll above so
+-- the two never interfere. migActive gates the whole state machine; phase is the
+-- last published value; aglStreak counts consecutive confirming samples; the two
+-- frame counters drive the sample and heartbeat cadences independently.
+local migActive       = false
+local phase           = "none"   -- "ground" / "air" / "none"
+local currentAircraft = ""        -- unit type, for the state file's "aircraft"
+local aglStreak       = 0
+local lastAgl         = nil       -- last AGL reading, for diagnostics/heartbeat
+local statePollFrames = 0
+local heartbeatFrames = 0
 
 
 -- ---------------------------------------------------------------------------
@@ -112,9 +145,23 @@ local function safeGetTheatre()
     return ""
 end
 
+local function safeGetAGL()
+    -- Export.* is available in the hooks Lua state. LoGetAltitudeAboveGroundLevel
+    -- returns metres above terrain for our own aircraft (local ownship truth).
+    -- It can be nil in menus/spectator or if the server disables ownship export,
+    -- so any failure returns nil and the caller leaves the phase unchanged.
+    local ok, result = pcall(function()
+        return Export.LoGetAltitudeAboveGroundLevel()
+    end)
+    if ok and type(result) == "number" then
+        return result
+    end
+    return nil
+end
+
 
 -- ---------------------------------------------------------------------------
--- Trigger file writing (atomic: write .tmp, then rename)
+-- Trigger and state file writing (atomic: write .tmp, then rename)
 -- ---------------------------------------------------------------------------
 local function jsonEscape(value)
     local s = tostring(value or "")
@@ -126,10 +173,33 @@ local function jsonEscape(value)
     return s
 end
 
+-- Shared atomic write: write a .tmp file then rename it into place. Returns
+-- ok, err (never raises). Used by both the trigger and the state file.
+local function atomicWrite(finalPath, contents)
+    local tmpPath = finalPath .. ".tmp"
+    local ok, err = pcall(function()
+        local handle = io.open(tmpPath, "w")
+        if not handle then
+            error("could not open " .. tmpPath .. " for writing")
+        end
+        handle:write(contents)
+        handle:close()
+        -- os.rename will not overwrite an existing destination on Windows, so
+        -- clear any stale file first (ignored if it is not there).
+        os.remove(finalPath)
+        local renamed, renameErr = os.rename(tmpPath, finalPath)
+        if not renamed then
+            error("rename failed: " .. tostring(renameErr))
+        end
+    end)
+    if not ok then
+        pcall(os.remove, tmpPath)
+    end
+    return ok, err
+end
+
 local function writeTrigger(aircraftType)
-    local writedir  = lfs.writedir()
-    local finalPath = writedir .. "Logs/dtc_kneeboard_trigger.json"
-    local tmpPath   = finalPath .. ".tmp"
+    local finalPath = lfs.writedir() .. "Logs/dtc_kneeboard_trigger.json"
 
     local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")  -- ISO 8601, UTC
     local mission   = safeGetMissionName()
@@ -143,28 +213,34 @@ local function writeTrigger(aircraftType)
         jsonEscape(theatre)
     )
 
-    local ok, err = pcall(function()
-        local handle = io.open(tmpPath, "w")
-        if not handle then
-            error("could not open " .. tmpPath .. " for writing")
-        end
-        handle:write(json)
-        handle:close()
-        -- os.rename will not overwrite an existing destination on Windows, so
-        -- clear any stale trigger first (ignored if it is not there).
-        os.remove(finalPath)
-        local renamed, renameErr = os.rename(tmpPath, finalPath)
-        if not renamed then
-            error("rename failed: " .. tostring(renameErr))
-        end
-    end)
-
+    local ok, err = atomicWrite(finalPath, json)
     if ok then
         log("Wrote trigger for '" .. aircraftType .. "' (mission='" .. mission ..
             "', theatre='" .. theatre .. "')")
     else
         log("Trigger write FAILED: " .. tostring(err))
-        pcall(os.remove, tmpPath)
+    end
+end
+
+-- Publish the current air/ground phase for the external app. aglMetres may be
+-- nil (unknown), in which case 0.0 is written so the JSON stays valid. A write
+-- failure is logged and swallowed; the app tolerates a missing/stale file.
+local function writeState(phaseValue, aglMetres)
+    local finalPath = lfs.writedir() .. "Logs/dtc_kneeboard_state.json"
+    local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")  -- ISO 8601, UTC
+    local aglNum    = tonumber(aglMetres) or 0.0
+
+    local json = string.format(
+        '{"phase": "%s", "aircraft": "%s", "agl_m": %.1f, "ts": "%s"}',
+        jsonEscape(phaseValue),
+        jsonEscape(currentAircraft),
+        aglNum,
+        jsonEscape(timestamp)
+    )
+
+    local ok, err = atomicWrite(finalPath, json)
+    if not ok then
+        log("State write FAILED: " .. tostring(err))
     end
 end
 
@@ -195,13 +271,76 @@ local function poll()
     if unitType:sub(1, #AIRCRAFT_PREFIX) == AIRCRAFT_PREFIX then
         log("MiG-29 detected: '" .. unitType .. "' on poll " .. pollCount)
         writeTrigger(unitType)
+        -- Activate the air/ground state machine. A ramp or runway start is on
+        -- the ground; an air start (rare) self-corrects on the first AGL read.
+        migActive       = true
+        phase           = "ground"
+        currentAircraft = unitType
+        aglStreak       = 0
+        statePollFrames = 0
+        heartbeatFrames = 0
+        writeState("ground", nil)
     else
         -- Different aircraft: do nothing. Any stale kneeboard from a previous
-        -- MiG-29 spawn is intentionally left in place.
+        -- MiG-29 spawn is intentionally left in place. Stand the state machine
+        -- down so the app shows Waiting.
         log("Non-MiG-29 unit ('" .. unitType .. "'); no action")
+        migActive       = false
+        phase           = "none"
+        currentAircraft = ""
+        writeState("none", nil)
     end
     -- Either branch is a definitive result, so stop polling.
     stopPolling()
+end
+
+
+-- ---------------------------------------------------------------------------
+-- Air/ground state machine (runs every frame while migActive)
+-- ---------------------------------------------------------------------------
+local function updateState()
+    statePollFrames = statePollFrames + 1
+    heartbeatFrames = heartbeatFrames + 1
+
+    -- Sample our height roughly once a second and apply hysteresis. A single
+    -- streak counter suffices: at any phase only one direction is "armed".
+    if statePollFrames >= STATE_POLL_FRAMES then
+        statePollFrames = 0
+        local agl = safeGetAGL()
+        if agl ~= nil then
+            lastAgl = agl
+            if phase ~= "air" and agl > AGL_AIR_M then
+                aglStreak = aglStreak + 1
+                if aglStreak >= AGL_CONFIRM_SAMPLES then
+                    phase = "air"
+                    aglStreak = 0
+                    writeState("air", agl)
+                    log(string.format("Phase -> air (agl=%.1f m)", agl))
+                end
+            elseif phase ~= "ground" and agl < AGL_GROUND_M then
+                aglStreak = aglStreak + 1
+                if aglStreak >= AGL_CONFIRM_SAMPLES then
+                    phase = "ground"
+                    aglStreak = 0
+                    writeState("ground", agl)
+                    log(string.format("Phase -> ground (agl=%.1f m)", agl))
+                end
+            else
+                -- In the hysteresis band, or already in the target phase.
+                aglStreak = 0
+            end
+        end
+        -- agl == nil: leave the phase unchanged (safe default keeps "ground").
+    end
+
+    -- Heartbeat: refresh the state file periodically so the app's staleness
+    -- check sees a live hook, and the log shows recent AGL readings.
+    if heartbeatFrames >= STATE_HEARTBEAT_FRAMES then
+        heartbeatFrames = 0
+        writeState(phase, lastAgl)
+        log(string.format("Heartbeat: phase=%s agl=%s", phase,
+            lastAgl and string.format("%.1f m", lastAgl) or "nil"))
+    end
 end
 
 
@@ -221,6 +360,14 @@ function handler.onPlayerChangeSlot(id)
         return
     end
 
+    -- Stand the state machine down for the duration of slot selection / loading
+    -- so the app shows Waiting until the new unit is confirmed (poll() turns it
+    -- back on if the new slot is a MiG-29).
+    migActive       = false
+    phase           = "none"
+    currentAircraft = ""
+    writeState("none", nil)
+
     -- Restart the deferred poll; the unit type is not reliable yet, so we only
     -- arm the timer here and read the type later in onSimulationFrame.
     pollActive = true
@@ -230,22 +377,38 @@ function handler.onPlayerChangeSlot(id)
 end
 
 function handler.onSimulationFrame()
-    if not pollActive then
-        return
+    -- Detection poll (v1.1, unchanged): only while armed by a slot change.
+    if pollActive then
+        frameCount = frameCount + 1
+        if frameCount >= INITIAL_DELAY_FRAMES
+           and ((frameCount - INITIAL_DELAY_FRAMES) % POLL_INTERVAL_FRAMES) == 0 then
+            -- Guard the poll so a failure can never propagate into the sim loop.
+            local ok, err = pcall(poll)
+            if not ok then
+                log("poll() raised: " .. tostring(err))
+                stopPolling("poll error")
+            end
+        end
     end
-    frameCount = frameCount + 1
-    if frameCount < INITIAL_DELAY_FRAMES then
-        return
+
+    -- Air/ground state machine (v1.2): independent of the detection poll, runs
+    -- only while in a MiG-29. Fully pcall-guarded for the same reason.
+    if migActive then
+        local ok, err = pcall(updateState)
+        if not ok then
+            log("updateState() raised: " .. tostring(err))
+        end
     end
-    if ((frameCount - INITIAL_DELAY_FRAMES) % POLL_INTERVAL_FRAMES) ~= 0 then
-        return
-    end
-    -- Guard the poll so a failure can never propagate into the sim loop.
-    local ok, err = pcall(poll)
-    if not ok then
-        log("poll() raised: " .. tostring(err))
-        stopPolling("poll error")
-    end
+end
+
+function handler.onSimulationStop()
+    -- Mission ended / returned to menu: stand the state machine down so the app
+    -- shows Waiting. Best-effort (writeState never raises).
+    migActive       = false
+    phase           = "none"
+    currentAircraft = ""
+    writeState("none", nil)
+    log("onSimulationStop: state machine stood down")
 end
 
 

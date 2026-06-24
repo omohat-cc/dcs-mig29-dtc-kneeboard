@@ -95,6 +95,15 @@ COLOUR_OK = "#1F8A3F"
 COLOUR_BAD = "#C1273B"
 COLOUR_BAD_HOVER = "#9E1F30"  # darker red for the Exit button's hover state
 COLOUR_WARN = "#D08700"
+COLOUR_IDLE = "gray60"        # neutral grey for the Waiting watch state
+
+# DTC Watch label: maps the watcher's phase ("ground"/"air"/"none") to the
+# user-facing text and colour. green Ground / amber Paused / grey Waiting.
+DTC_WATCH_STATES: Dict[str, tuple[str, str]] = {
+    "ground": ("DTC Watch: Ground", COLOUR_OK),
+    "air": ("DTC Watch: Paused", COLOUR_WARN),
+    "none": ("DTC Watch: Waiting", COLOUR_IDLE),
+}
 
 
 def _resource_dir() -> Path:
@@ -293,6 +302,9 @@ class DTCKneeboardApp(ctk.CTk):
         # so a second click cannot start an overlapping rebuild.
         self.regenerate_button: Optional[ctk.CTkButton] = None
         self._regenerating = False
+        # Always-visible DTC Watch indicator (Item 5); updated off the watcher
+        # thread via the command queue, never touched directly off the Tk loop.
+        self.dtc_watch_label: Optional[ctk.CTkLabel] = None
         # Resolved once: the bundled confirmation sound played on each render.
         self._sound_path = sound.kneeboard_sound_path(_resource_dir())
 
@@ -390,6 +402,15 @@ class DTCKneeboardApp(ctk.CTk):
             text="Rebuild the page from the latest in-jet DTC (e.g. after editing it in the cockpit).",
             anchor="w", justify="left", text_color=("gray40", "gray70"),
         ).grid(row=0, column=1, sticky="w", padx=(4, 12), pady=12)
+
+        # DTC Watch indicator: Waiting / Ground / Paused (Item 5). Auto-regenerate
+        # watches the DTC temp file while parked; this shows that watch's state.
+        text, colour = DTC_WATCH_STATES["none"]
+        self.dtc_watch_label = ctk.CTkLabel(
+            frame, text=text, width=150, anchor="e",
+            font=ctk.CTkFont(weight="bold"), text_color=colour,
+        )
+        self.dtc_watch_label.grid(row=0, column=2, sticky="e", padx=(4, 12), pady=12)
 
     def _build_status_section(self) -> None:
         """Build the bottom status card: a read-only, scrolling, timestamped log."""
@@ -539,8 +560,12 @@ class DTCKneeboardApp(ctk.CTk):
         if self.watcher is not None and self.watcher.is_running():
             self.watcher.stop()
         self.watcher = TriggerWatcher(
-            self.app_config, on_generated=self._on_kneeboard_generated
+            self.app_config,
+            on_generated=self._on_kneeboard_generated,
+            on_phase_change=self._on_phase_change,
         )
+        # Reset the indicator to Waiting whenever the watcher is (re)started.
+        self._apply_watch_label("none")
         self.watcher.start()  # logs "Watching..." or an error if paths are unset
 
     def _on_kneeboard_generated(self, path: Path) -> None:
@@ -555,6 +580,26 @@ class DTCKneeboardApp(ctk.CTk):
         """
         logger.info("Kneeboard generated; playing confirmation sound (%s).", self._sound_path)
         sound.play_sound(self._sound_path)
+
+    def _on_phase_change(self, phase: str) -> None:
+        """Watcher phase callback: marshal the label update onto the Tk loop.
+
+        Runs on the watcher's daemon thread, so it must not touch Tk directly
+        (gotcha 3); it enqueues the update onto the command queue, which the
+        100 ms GUI pump drains on the main thread.
+        """
+        self._command_queue.put(lambda: self._apply_watch_label(phase))
+
+    def _apply_watch_label(self, phase: str) -> None:
+        """Set the DTC Watch label text/colour from the phase (Tk-thread only)."""
+        label = self.dtc_watch_label
+        if label is None:
+            return
+        text, colour = DTC_WATCH_STATES.get(phase, DTC_WATCH_STATES["none"])
+        try:
+            label.configure(text=text, text_color=colour)
+        except Exception:  # noqa: BLE001 - the label is cosmetic, never fatal
+            logger.debug("Could not update the DTC watch label", exc_info=True)
 
     # --- regenerate action -------------------------------------------------
     def _on_regenerate_clicked(self) -> None:

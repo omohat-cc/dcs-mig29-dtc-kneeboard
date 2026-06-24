@@ -52,9 +52,26 @@ the mission and no game files are modified; the hook uses DCS's official
 
 The app sits in the system tray while you fly: closing the window (X) minimises
 it there, the **Exit** button (or the tray's Quit) closes it for good, and only
-one copy runs at a time. If you edit the DTC in the cockpit after spawning,
-click **Regenerate Kneeboard** to rebuild the page on demand (the automatic
-trigger only fires on a fresh MiG-29 spawn, not on a mid-flight edit).
+one copy runs at a time.
+
+### Live DTC watch (auto-regenerate on the ground)
+
+While you are parked on the ground in a MiG-29, the app watches the DTC for
+changes and regenerates the kneeboard automatically (about every 5 seconds), so
+editing the cartridge in the in-cockpit **DTC manager** refreshes the page
+without a respawn. It pauses once you are airborne and resumes when you land; a
+small **DTC Watch** indicator shows the state (Waiting / Ground / Paused). You
+can still press **Regenerate Kneeboard** to force a rebuild at any time.
+
+> **Important - the built-in DCS kneeboard does not refresh mid-mission.** DCS
+> caches each kneeboard page image and only re-reads it when you **respawn**; a
+> page-turn or kneeboard toggle does not refresh it. So although the app writes
+> the updated page within a few seconds, the *native* DCS kneeboard keeps showing
+> the version from your last spawn. The live ground-watch is therefore only
+> useful if you view the page through a tool that reads the file live, such as
+> [OpenKneeboard](https://openkneeboard.com/) (which most VR pilots already use)
+> - it picks up each regeneration straight away. With the native kneeboard, just
+> respawn to load the new page (it regenerates on spawn anyway).
 
 ## Installation
 

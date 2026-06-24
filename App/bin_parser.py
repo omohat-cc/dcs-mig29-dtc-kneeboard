@@ -99,6 +99,8 @@ def find_dtc_bin_files(
     directory: Union[str, Path],
     min_size: int = MIN_FILE_SIZE,
     max_size: int = MAX_FILE_SIZE,
+    *,
+    verbose: bool = True,
 ) -> list[Path]:
     """Return candidate ``~tr*.bin`` files, size-filtered and newest-first.
 
@@ -106,10 +108,15 @@ def find_dtc_bin_files(
         directory: The DCS temp directory to scan.
         min_size: Inclusive lower size bound in bytes.
         max_size: Inclusive upper size bound in bytes.
+        verbose: When False, suppress the per-call "Found N candidate" INFO log
+            (used by the watcher's on-ground change-check, which calls this every
+            few seconds and would otherwise spam the log).
 
     Returns:
         Matching files sorted by modification time, most recent first. Returns
-        an empty list if the directory is missing or nothing matches. Never
+        an empty list if the directory is missing or nothing matches. Each file's
+        size/mtime come from a fresh ``path.stat()`` (not the directory-listing
+        cache, which can lag on Windows for a file still open by DCS). Never
         raises.
     """
     try:
@@ -138,7 +145,8 @@ def find_dtc_bin_files(
 
         candidates.sort(key=lambda item: item[0], reverse=True)
         ordered = [path for _, path in candidates]
-        logger.info("Found %d candidate .bin file(s) in %s.", len(ordered), dir_path)
+        if verbose:
+            logger.info("Found %d candidate .bin file(s) in %s.", len(ordered), dir_path)
         return ordered
     except Exception as exc:  # never crash the watcher
         logger.exception("Unexpected error scanning %s: %s", directory, exc)

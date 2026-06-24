@@ -14,20 +14,31 @@ MiG-29A's DTC (Data Transfer Cartridge) configuration in DCS World:
    customtkinter GUI that watches for the trigger, extracts the DTC from DCS's
    binary temp files, resolves it, and renders the kneeboard image.
 
-## Status (2026-06-17)
+## Status (2026-06-24)
 
 Working end-to-end on Windows: spawning a MiG-29 in DCS generates the kneeboard,
 live-tested in single-player and on a populated multiplayer server. All modules,
 the GUI (`main.py`) and PyInstaller `--onefile` packaging are done. Developed on
-macOS; built via GitHub Actions (Windows runner). **Released as v1.1.0.** Recent
-enhancements (all live-confirmed): the multiplayer hook guard (v1.1), reading the
-*newest* DTC copy from the temp file, in-memory render dedupe, version-stamped CI
-builds, the ADF frequency cross-check shown beneath resolved beacon names, an
-audible confirmation sound on kneeboard generation, real-world emitter subtitles
-on the SPO-15 threats, an on-demand **Regenerate Kneeboard** button (force-renders
-for mid-flight DTC edits made in the jet, and as a spawn-detection fallback), and
-an **Exit button plus single-instance guard** (gotcha 14). Remaining: a global
-**regenerate hotkey** (reuses the regenerate path), then broader testing.
+macOS; built via GitHub Actions (Windows runner). **Released as v1.1.0; v1.2.0
+(ground-polling auto-regenerate) is being cut.** Recent enhancements (all
+live-confirmed): the multiplayer hook guard (v1.1), reading the *newest* DTC copy
+from the temp file, in-memory render dedupe, version-stamped CI builds, the ADF
+frequency cross-check shown beneath resolved beacon names, an audible
+confirmation sound on kneeboard generation, real-world emitter subtitles on the
+SPO-15 threats, an on-demand **Regenerate Kneeboard** button, and an **Exit
+button plus single-instance guard** (gotcha 14).
+
+**v1.2.0 - ground-polling auto-regenerate (Item 5, live-confirmed):** the hook
+(v1.2) runs an air/ground state machine off the local AGL and publishes a phase
+to `dtc_kneeboard_state.json`; while parked the app change-checks the DTC temp
+file (~5s) and regenerates on a real edit, pausing airborne. A 3-state **DTC
+Watch** label shows it. This **replaced** the planned global regenerate hotkey
+(collision risk with DCS/SRS/TacView/VoiceAttack). The generation sound now fires
+only on a genuine content change (not a forced re-render of identical content).
+**Key live finding (gotcha 15):** the app renders correctly, but DCS caches the
+native kneeboard page and only reloads it on respawn, so the live ground-watch is
+only visible through a tool that reads the file live (e.g. OpenKneeboard); the
+README documents this limitation. Remaining: broader multiplayer testing.
 
 ## Conventions (non-negotiable)
 
@@ -144,6 +155,11 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
    NEWEST complete copy (falling back if the last is truncated); reading the first
    copy returns a stale config, so a mid-session DTC change is never picked up.
    The log line `Using DTC copy N of M (newest valid)` shows which was used.
+   **Re-verified 2026-06-24** against a real 13-copy capture (copies 1-7 = config
+   A, copies 8-13 = config B): the parser returned copy 13 and the render
+   reflected config B. If the in-sim kneeboard still shows the old config, that is
+   DCS's page cache (gotcha 15), NOT a stale read - diagnose by opening the JPEG
+   file directly, not by assuming the parser regressed.
 10. **The MiG-29 spawn hook (v1.1) ignores non-local slot changes.** In MP, DCS
     calls `onPlayerChangeSlot(id)` for EVERY player; each call re-armed the
     deferred poll, which re-detected our (still MiG-29) local unit and re-wrote the
@@ -156,10 +172,13 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     renders (so it can never get "stuck"), and no working file is left in the
     kneeboard folder (a stale sidecar from an earlier build is deleted on sight).
     `generate_kneeboard(force=True)` bypasses it (for the future manual regenerate).
-12. **The generation sound is Windows-only and fires only on an actual render.**
-    `main.py` passes `TriggerWatcher` an `on_generated` callback; the watcher
-    invokes it (in `_notify_generated`) only after a real render, never on a
-    dedupe skip, so an identical respawn stays silent. The callback runs on the
+12. **The generation sound is Windows-only and fires only on a genuine DTC
+    content change.** `main.py` passes `TriggerWatcher` an `on_generated`
+    callback; the watcher invokes it (in `_notify_generated`) only when the
+    resolved DTC fingerprint actually changed, never on a dedupe skip, and never
+    on a forced re-render of identical content (so a redundant Regenerate click,
+    or an identical respawn, stays silent rather than sounding a false "done").
+    The callback runs on the
     watcher's daemon thread and calls `sound.play_sound`, which uses stdlib
     `winsound` with `SND_ASYNC` (non-blocking, so it never touches Tk and needs no
     marshalling) and is a logged no-op off Windows. The asset is the bundled
@@ -174,10 +193,11 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     (`_on_regenerate_done`). `force=True` bypasses the in-memory dedupe (the user
     explicitly asked for a fresh page). The button is disabled while a rebuild is in
     flight (an `_regenerating` flag, set/cleared only on the Tk thread). Do NOT play
-    the confirmation sound in the handler: a forced render still fires the watcher's
-    `on_generated` callback (gotcha 12), so playing it here would double up. A
-    `None` return surfaces a friendly summary in the status log; `generate_kneeboard`
-    has already logged the specific reason on the line above.
+    the confirmation sound in the handler: a forced render of *changed* content
+    still fires the watcher's `on_generated` callback (gotcha 12), so playing it
+    here would double up; a forced render of unchanged content deliberately stays
+    silent. A `None` return surfaces a friendly summary in the status log;
+    `generate_kneeboard` has already logged the specific reason on the line above.
 14. **Close (X) minimises to the tray; only the Exit button (or the tray's Quit)
     actually quits, and a single-instance guard stops duplicates.** Because X only
     withdraws to the tray (correct for a background watcher), it is easy to forget a
@@ -196,6 +216,21 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     starting). The mutex name is version-independent, so every guard-bearing build
     blocks every other; only pre-guard builds (before v1.1.0) can still run in
     parallel.
+15. **DCS caches the kneeboard page image; a mid-session update needs a page-flip
+    to show.** The app writes `000_dtc_config.jpg` correctly, but DCS only
+    re-reads a kneeboard page on a page-turn / kneeboard toggle (RSHIFT+K) /
+    respawn (design doc 4.5). So after a ground auto-regenerate or a manual
+    Regenerate, the *file* is current but the *in-sim page* keeps showing the
+    cached (usually the spawn = "first") config until you flip the page. This
+    masquerades as "the app is reading the first/stale DTC copy" (gotcha 9) when
+    it is not: confirmed 2026-06-24 from a user log + the attached temp file -
+    `bin_parser` returned copy 13 of 13 (newest) and the rendered JPEG differed
+    from the spawn copy, yet the cockpit page still showed the spawn config.
+    **To diagnose any "kneeboard didn't change" report, open the JPEG file
+    directly** (`<Saved Games>\Kneeboard\MiG-29 Fulcrum\000_dtc_config.jpg`,
+    Windows Photos); if it shows the new config, it is DCS's cache, not the app.
+    The watcher logs a page-flip reminder after each real update. There is no
+    app-side way to force DCS to reload (DCS owns the page lifecycle).
 
 ## Build, run, test
 

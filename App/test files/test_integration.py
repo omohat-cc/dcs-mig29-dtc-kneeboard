@@ -403,8 +403,9 @@ def test_dedupe_unchanged(checks: Checks) -> None:
 
 
 def test_on_generated_callback(checks: Checks) -> None:
-    """on_generated fires once per actual render, never on a dedupe skip."""
-    _banner("ON-GENERATED CALLBACK  -  fires on render, silent on dedupe skip")
+    """on_generated fires on a content change, silent on a dedupe skip or an
+    unchanged forced re-render (the sound signals a *new* kneeboard)."""
+    _banner("ON-GENERATED CALLBACK  -  fires on content change only")
     if not REAL_BIN.is_file():
         checks.skip("on_generated callback", f"sample .bin not found at {REAL_BIN}")
         return
@@ -430,10 +431,21 @@ def test_on_generated_callback(checks: Checks) -> None:
         checks.check("Callback did not fire on dedupe skip", len(fired) == 1,
                      f"{len(fired)} call(s)")
 
-        # 3. force=True -> renders again -> callback fires again.
+        # 3. force=True re-renders identical content -> path returned, but the
+        #    callback must NOT fire (it signals a new kneeboard, not a redundant
+        #    re-render). This is what stops a Regenerate click sounding a false
+        #    "done" when the DTC has not actually changed.
         forced = watcher.generate_kneeboard(force=True)
-        checks.check("force=True returns a path", forced is not None, str(forced))
-        checks.check("Callback fired again on forced render", len(fired) == 2,
+        checks.check("force=True returns a path (re-rendered)", forced is not None, str(forced))
+        checks.check("Callback did NOT fire on an unchanged forced re-render",
+                     len(fired) == 1, f"{len(fired)} call(s)")
+
+        # 3b. A genuine content change (simulated by clearing the remembered
+        #     fingerprint) -> the callback fires, even outside a forced render.
+        watcher._last_fingerprint = None
+        changed = watcher.generate_kneeboard()
+        checks.check("Changed content returns a path", changed is not None, str(changed))
+        checks.check("Callback fired on a real content change", len(fired) == 2,
                      f"{len(fired)} call(s)")
 
         # 4. A raising callback must not break the pipeline (still returns a path).
