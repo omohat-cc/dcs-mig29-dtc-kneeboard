@@ -649,6 +649,15 @@ class TriggerWatcher:
             # Regenerate), which would otherwise sound a false "done".
             if changed:
                 self._notify_generated(result)
+                # DCS caches the kneeboard page image and only re-reads it on a
+                # page-turn / toggle / respawn, so the file is current but the
+                # in-sim page can lag. Remind the user how to refresh it (this is
+                # the usual reason a fresh render "looks unchanged" in the pit).
+                self._log(
+                    "Kneeboard updated. If the in-sim page still looks unchanged, "
+                    "turn the kneeboard page (or toggle it with RSHIFT+K) to reload "
+                    "it - DCS caches the page image until then."
+                )
             else:
                 self._log("Kneeboard re-rendered; the DTC is unchanged from the last one.")
             return result

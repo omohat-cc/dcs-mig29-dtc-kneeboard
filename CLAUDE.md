@@ -144,6 +144,11 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
    NEWEST complete copy (falling back if the last is truncated); reading the first
    copy returns a stale config, so a mid-session DTC change is never picked up.
    The log line `Using DTC copy N of M (newest valid)` shows which was used.
+   **Re-verified 2026-06-24** against a real 13-copy capture (copies 1-7 = config
+   A, copies 8-13 = config B): the parser returned copy 13 and the render
+   reflected config B. If the in-sim kneeboard still shows the old config, that is
+   DCS's page cache (gotcha 15), NOT a stale read - diagnose by opening the JPEG
+   file directly, not by assuming the parser regressed.
 10. **The MiG-29 spawn hook (v1.1) ignores non-local slot changes.** In MP, DCS
     calls `onPlayerChangeSlot(id)` for EVERY player; each call re-armed the
     deferred poll, which re-detected our (still MiG-29) local unit and re-wrote the
@@ -200,6 +205,21 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     starting). The mutex name is version-independent, so every guard-bearing build
     blocks every other; only pre-guard builds (before v1.1.0) can still run in
     parallel.
+15. **DCS caches the kneeboard page image; a mid-session update needs a page-flip
+    to show.** The app writes `000_dtc_config.jpg` correctly, but DCS only
+    re-reads a kneeboard page on a page-turn / kneeboard toggle (RSHIFT+K) /
+    respawn (design doc 4.5). So after a ground auto-regenerate or a manual
+    Regenerate, the *file* is current but the *in-sim page* keeps showing the
+    cached (usually the spawn = "first") config until you flip the page. This
+    masquerades as "the app is reading the first/stale DTC copy" (gotcha 9) when
+    it is not: confirmed 2026-06-24 from a user log + the attached temp file -
+    `bin_parser` returned copy 13 of 13 (newest) and the rendered JPEG differed
+    from the spawn copy, yet the cockpit page still showed the spawn config.
+    **To diagnose any "kneeboard didn't change" report, open the JPEG file
+    directly** (`<Saved Games>\Kneeboard\MiG-29 Fulcrum\000_dtc_config.jpg`,
+    Windows Photos); if it shows the new config, it is DCS's cache, not the app.
+    The watcher logs a page-flip reminder after each real update. There is no
+    app-side way to force DCS to reload (DCS owns the page lifecycle).
 
 ## Build, run, test
 
