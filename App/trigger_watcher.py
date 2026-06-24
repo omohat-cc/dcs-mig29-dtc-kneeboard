@@ -33,11 +33,9 @@ Only the standard library plus the sibling app modules are imported (no
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import logging
-import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -45,7 +43,7 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from beacon_parser import BeaconResolver
-from bin_parser import BIN_GLOB, MAX_FILE_SIZE, MIN_FILE_SIZE, extract_dtc_from_directory
+from bin_parser import extract_dtc_from_directory, find_dtc_bin_files
 from config import (
     DEFAULT_GROUND_POLL_SECONDS,
     DEFAULT_STATE_STALE_SECONDS,
@@ -459,32 +457,25 @@ class TriggerWatcher:
     def _current_bin_stat(self) -> Optional[tuple[str, float, int]]:
         """Cheaply identify the newest candidate ``~tr*.bin`` (no content read).
 
-        Scans the temp dir for size-banded ``~tr*.bin`` files and returns
-        ``(name, mtime, size)`` of the newest by mtime, or ``None`` if the temp
-        path is unset/missing or nothing qualifies. Uses :func:`os.scandir`, so
-        the size/mtime come from the directory entry without an extra read - safe
-        to call every few seconds. Never raises.
+        Reuses :func:`bin_parser.find_dtc_bin_files` (the same size-banded,
+        newest-first scan the full extraction uses, so the two always agree on
+        "newest") and returns ``(name, mtime, size)`` of the newest, or ``None``
+        if the temp path is unset/missing or nothing qualifies. The size/mtime
+        come from a fresh ``path.stat()`` rather than the directory-listing cache
+        - important on Windows, where that cache can lag for a file DCS still has
+        open, which would otherwise hide a just-applied DTC change. Reads no file
+        contents, so it is safe to call every few seconds. Never raises.
         """
         temp = self.temp_path
         if temp is None:
             return None
         try:
-            newest: Optional[tuple[str, float, int]] = None
-            with os.scandir(temp) as entries:
-                for entry in entries:
-                    if not fnmatch.fnmatch(entry.name, BIN_GLOB):
-                        continue
-                    try:
-                        if not entry.is_file():
-                            continue
-                        stat = entry.stat()
-                    except OSError:
-                        continue
-                    if stat.st_size < MIN_FILE_SIZE or stat.st_size > MAX_FILE_SIZE:
-                        continue
-                    if newest is None or stat.st_mtime > newest[1]:
-                        newest = (entry.name, stat.st_mtime, stat.st_size)
-            return newest
+            candidates = find_dtc_bin_files(temp, verbose=False)
+            if not candidates:
+                return None
+            newest = candidates[0]
+            stat = newest.stat()
+            return (newest.name, stat.st_mtime, stat.st_size)
         except OSError as exc:
             logger.debug("Could not scan temp dir %s for the ground check: %s", temp, exc)
             return None
@@ -597,16 +588,18 @@ class TriggerWatcher:
         Args:
             trigger_data: The parsed trigger (informational only; logged). The
                 terrain and aircraft come from the DTC itself, not the trigger.
-            force: If True, bypass the dedupe and always re-render. The manual
-                "regenerate" action (a later item) uses this.
+            force: If True, bypass the dedupe and always re-render (the manual
+                Regenerate action uses this). The confirmation notification still
+                fires only on a genuine content change, so a forced re-render of
+                identical content writes the JPEG but stays silent.
 
         Returns:
-            The kneeboard JPEG path **only if a fresh image was rendered this
-            call**; otherwise ``None`` - whether there was no DTC, a stage
-            failed, or the DTC was unchanged (a dedupe skip). A non-None return
-            therefore means "a new image was written", which is the signal the
-            on-generated notification (a later item) should fire on; a dedupe
-            skip deliberately returns ``None`` so it stays silent. Never raises.
+            The kneeboard JPEG path if an image was rendered this call (a real
+            content change, or any ``force=True`` call), else ``None`` - no DTC,
+            a stage failed, or an unchanged DTC on a non-forced call (a dedupe
+            skip). The on-generated notification fires only when the DTC content
+            actually **changed**, so a forced re-render of identical content
+            returns a path yet stays silent. Never raises.
         """
         temp = self.temp_path
         output = self.output_path
@@ -641,7 +634,8 @@ class TriggerWatcher:
 
             # --- content fingerprint dedupe (after full resolution) ---------
             fingerprint = self._compute_fingerprint(processed)
-            if not force and fingerprint == self._last_fingerprint and output.is_file():
+            changed = fingerprint != self._last_fingerprint
+            if not force and not changed and output.is_file():
                 self._log("DTC unchanged; kneeboard not regenerated.")
                 return None
 
@@ -649,7 +643,14 @@ class TriggerWatcher:
             # Remember what we just rendered so identical respawns dedupe.
             self._last_fingerprint = fingerprint
             result = Path(written)
-            self._notify_generated(result)
+            # The confirmation notification (the GUI's "generated" sound) signals
+            # a NEW kneeboard, so it fires only on a genuine content change - never
+            # on a forced re-render of identical content (e.g. a redundant manual
+            # Regenerate), which would otherwise sound a false "done".
+            if changed:
+                self._notify_generated(result)
+            else:
+                self._log("Kneeboard re-rendered; the DTC is unchanged from the last one.")
             return result
 
         except DTCProcessingError as exc:

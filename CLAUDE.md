@@ -156,10 +156,13 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     renders (so it can never get "stuck"), and no working file is left in the
     kneeboard folder (a stale sidecar from an earlier build is deleted on sight).
     `generate_kneeboard(force=True)` bypasses it (for the future manual regenerate).
-12. **The generation sound is Windows-only and fires only on an actual render.**
-    `main.py` passes `TriggerWatcher` an `on_generated` callback; the watcher
-    invokes it (in `_notify_generated`) only after a real render, never on a
-    dedupe skip, so an identical respawn stays silent. The callback runs on the
+12. **The generation sound is Windows-only and fires only on a genuine DTC
+    content change.** `main.py` passes `TriggerWatcher` an `on_generated`
+    callback; the watcher invokes it (in `_notify_generated`) only when the
+    resolved DTC fingerprint actually changed, never on a dedupe skip, and never
+    on a forced re-render of identical content (so a redundant Regenerate click,
+    or an identical respawn, stays silent rather than sounding a false "done").
+    The callback runs on the
     watcher's daemon thread and calls `sound.play_sound`, which uses stdlib
     `winsound` with `SND_ASYNC` (non-blocking, so it never touches Tk and needs no
     marshalling) and is a logged no-op off Windows. The asset is the bundled
@@ -174,10 +177,11 @@ main.py wires config + hook_manager + trigger_watcher behind the GUI and tray.
     (`_on_regenerate_done`). `force=True` bypasses the in-memory dedupe (the user
     explicitly asked for a fresh page). The button is disabled while a rebuild is in
     flight (an `_regenerating` flag, set/cleared only on the Tk thread). Do NOT play
-    the confirmation sound in the handler: a forced render still fires the watcher's
-    `on_generated` callback (gotcha 12), so playing it here would double up. A
-    `None` return surfaces a friendly summary in the status log; `generate_kneeboard`
-    has already logged the specific reason on the line above.
+    the confirmation sound in the handler: a forced render of *changed* content
+    still fires the watcher's `on_generated` callback (gotcha 12), so playing it
+    here would double up; a forced render of unchanged content deliberately stays
+    silent. A `None` return surfaces a friendly summary in the status log;
+    `generate_kneeboard` has already logged the specific reason on the line above.
 14. **Close (X) minimises to the tray; only the Exit button (or the tray's Quit)
     actually quits, and a single-instance guard stops duplicates.** Because X only
     withdraws to the tray (correct for a background watcher), it is easy to forget a
